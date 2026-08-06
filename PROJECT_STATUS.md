@@ -32,8 +32,12 @@
 
 ## Этап 3 — Catalog
 - Статус: 🟩 Catalog design completed
-- Комментарии: Добавлены миграция 004_catalog_schema.sql, CATALOG_DESIGN.md, and n8n workflows WF_05_PROFILE_CATALOG and WF_06_PROFILE_VIEW (design + JSON templates).
+- Комментарии: Добавлены миграция 004_catalog_schema.sql, CATALOG_DESIGN.md, and n8n workflows WF_05_PROFILE_CATALOG, WF_06_PROFILE_VIEW, WF_07_FAVORITES (design + JSON templates).
 
 ## Этап 3.1 — Catalog completed
 - Статус: 🟩 Completed
 - Комментарии: Добавлены favorites endpoint (WF_07), pagination and filters for WF_05, and API design documentation.
+
+## Этап 4 — Anonymous Chat
+- Статус: 🟩 Chat architecture design completed
+- Комментарии: Добавлены chat schema (005_chat_schema.sql), CHAT_DESIGN.md and CHAT_FLOW.md describing flows, blocking and reporting.
