@@ -4,7 +4,7 @@
 
 Главный документ:
 
-00_Glavnoe_TZ_Arhitektura_platformy_znakomstv_MVP_v1.0
+docs/tz/00_ARCHITECTURE/00_Glavnoe_TZ_Arhitektura_platformy_znakomstv_MVP_v1.0
 
 Все изменения архитектуры должны сначала согласовываться с главным ТЗ.
 
@@ -65,3 +65,12 @@ TZ_13 MVP Launch
 Следующий шаг:
 
 WF_02 role selection
+
+
+### Архитектура-папка
+
+Главное ТЗ и связанная архитектурная документация расположены в:
+
+- docs/tz/00_ARCHITECTURE/
+
+Пожалуйста, обновляйте индекс при добавлении файлов в эту папку.
