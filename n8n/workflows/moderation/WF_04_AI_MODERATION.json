@@ -1,0 +1,155 @@
+{
+  "name": "WF_04_AI_MODERATION",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-moderation-webhook",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250,250],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {"name":"profile_id","value":"={{$json[\"body\"] && $json[\"body\"].profile_id ? $json.body.profile_id : $json[\"profile_id\"]}}"}
+          ]
+        }
+      },
+      "name": "Extract profile_id",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450,250]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM profiles WHERE id = '{{ $json[\"profile_id\"] }}';"
+      },
+      "name": "Load profile",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650,150],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT telegram_file_id, sort_order FROM profile_photos WHERE profile_id = '{{ $json[\"profile_id\"] }}' ORDER BY sort_order;"
+      },
+      "name": "Load photos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650,350],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, ai_context, current_step FROM profile_ai_sessions WHERE user_id = (SELECT user_id FROM profiles WHERE id = '{{ $json[\"profile_id\"] }}') ORDER BY created_at DESC LIMIT 1;"
+      },
+      "name": "Load AI session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650,550],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "resource": "chat.completions",
+        "temperature": 0.0,
+        "messages": "=[{\"role\":\"system\",\"content\":\"You are a moderation assistant. Given a profile and metadata, evaluate the text for prohibited content, suspicious phrases, fraud indicators and spam. Return a JSON object with keys: status (APPROVED|REJECTED|REVIEW), score (0-100), flags (array of strings), reason (text). Do not include any user contact info.\"},{\"role\":\"user\",\"content\": \"Profile: {{ $json[\"rows\"] && $json[\"rows\"][0] ? JSON.stringify($json.rows[0]) : '' }} Photos: {{ $json[\"rows\"] && $json[\"rows\"][1] ? JSON.stringify($json.rows[1]) : '' }} AIContext: {{ $json[\"rows\"] && $json[\"rows\"][2] ? JSON.stringify($json.rows[2]) : '' }}\"}]"
+      },
+      "name": "AI Agent",
+      "type": "n8n-nodes-base.openai",
+      "typeVersion": 1,
+      "position": [900,350],
+      "credentials": {"openaiApi": {"id":"AI_CREDENTIAL_PLACEHOLDER","name":"AI_CREDENTIAL_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {
+        "value": "={{ $json[\"choices\"] && $json[\"choices\"][0] && $json[\"choices\"][0].message ? $json[\"choices\"][0].message.content : '{}'}}",
+        "options": {"binaryData": false}
+      },
+      "name": "Parse AI JSON",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1100,350]
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- Default: create a profile_moderation record and set moderation_data based on AI result\nINSERT INTO profile_moderation (profile_id, moderator_type, status, reason, moderation_data) VALUES ('{{ $json[\"profile_id\"] }}', 'AI', '{{ $json[\"value\"] && (JSON.parse($json[\"value\"]).status) ? JSON.parse($json[\"value\"]).status : 'REVIEW' }}', (JSON.parse($json[\"value\"]).reason)::text, (JSON.parse($json[\"value\"])::jsonb));"},
+      "name": "Create moderation record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1300,350],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- Insert moderation_history entry\nINSERT INTO moderation_history (profile_id, action, old_status, new_status, actor_type, actor_id, comment) VALUES ('{{ $json[\"profile_id\"] }}', 'ai_moderation', (SELECT status FROM profiles WHERE id = '{{ $json[\"profile_id\"] }}'), (CASE WHEN (JSON.parse($json[\"value\"]).status) = 'APPROVED' THEN 'ACTIVE' WHEN (JSON.parse($json[\"value\"]).status) = 'REJECTED' THEN 'BLOCKED' ELSE 'PENDING_MODERATION' END), 'AI', NULL, (JSON.parse($json[\"value\"]).reason)::text);"},
+      "name": "Create moderation history",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1500,350],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- Branch action: APPROVED -> set profile active\nUPDATE profiles SET status = 'ACTIVE', updated_at = now() WHERE id = '{{ $json[\"profile_id\"] }}' AND (JSON.parse($json[\"value\"]).status) = 'APPROVED';"},
+      "name": "Set profile ACTIVE",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1700,200],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- Branch action: REJECTED -> block profile\nUPDATE profiles SET status = 'BLOCKED', updated_at = now() WHERE id = '{{ $json[\"profile_id\"] }}' AND (JSON.parse($json[\"value\"]).status) = 'REJECTED';"},
+      "name": "Set profile BLOCKED",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1700,350],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- Branch action: REVIEW -> set profile to PENDING_MODERATION\nUPDATE profiles SET status = 'PENDING_MODERATION', updated_at = now() WHERE id = '{{ $json[\"profile_id\"] }}' AND (JSON.parse($json[\"value\"]).status) = 'REVIEW';"},
+      "name": "Set profile PENDING_MODERATION",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1700,500],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- Always create audit_event\nINSERT INTO audit_events (user_id, event_type, event_data) VALUES ((SELECT user_id FROM profiles WHERE id = '{{ $json[\"profile_id\"] }}'), 'ai_moderation_finished', (JSON.parse($json[\"value\"])::jsonb));"},
+      "name": "Create audit_event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1900,350],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"chatId":"ADMIN_CHAT_PLACEHOLDER","text":"Profile {{ $json[\"profile_id\"] }} requires review. AI verdict: {{ (JSON.parse($json[\"value\"]).status) }} Score: {{ (JSON.parse($json[\"value\"]).score) }} Flags: {{ (JSON.parse($json[\"value\"]).flags) }} Reason: {{ (JSON.parse($json[\"value\"]).reason) }}","options":{}},
+      "name":"Notify admin",
+      "type":"n8n-nodes-base.telegram",
+      "typeVersion":1,
+      "position":[2100,500],
+      "credentials":{"telegramApi":{"id":"TELEGRAM_PLACEHOLDER","name":"TELEGRAM_PLACEHOLDER"}}
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main":[[{"node":"Extract profile_id","type":"main","index":0}]]},
+    "Extract profile_id": {"main":[[{"node":"Load profile","type":"main","index":0},{"node":"Load photos","type":"main","index":0},{"node":"Load AI session","type":"main","index":0}]]},
+    "Load profile": {"main":[[{"node":"AI Agent","type":"main","index":0}]]},
+    "Load photos": {"main":[[{"node":"AI Agent","type":"main","index":0}]]},
+    "Load AI session": {"main":[[{"node":"AI Agent","type":"main","index":0}]]},
+    "AI Agent": {"main":[[{"node":"Parse AI JSON","type":"main","index":0}]]},
+    "Parse AI JSON": {"main":[[{"node":"Create moderation record","type":"main","index":0},{"node":"Create moderation history","type":"main","index":0},{"node":"Set profile ACTIVE","type":"main","index":0},{"node":"Set profile BLOCKED","type":"main","index":0},{"node":"Set profile PENDING_MODERATION","type":"main","index":0},{"node":"Create audit_event","type":"main","index":0},{"node":"Notify admin","type":"main","index":0}]]}
+  },
+  "active": false,
+  "settings": {},
+  "id": "WF_04_AI_MODERATION_0001"
+}

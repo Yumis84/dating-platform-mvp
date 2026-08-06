@@ -25,3 +25,7 @@
 ## Этап 2.3 — Moderation
 - Статус: 🟩 Database design completed
 - Комментарии: Добавлены таблицы profile_moderation, moderation_rules, moderation_history и дизайн модерации оформлен в database/MODERATION_DESIGN.md.
+
+## Этап 2.4 — AI Moderation
+- Статус: 🟩 AI Moderation workflow design completed
+- Комментарии: Добавлен WF_04_AI_MODERATION design (n8n workflow template) and documentation for AI moderation flow.
