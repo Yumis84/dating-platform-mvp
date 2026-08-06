@@ -21,3 +21,7 @@
 ## Этап 2 — AI Profile
 - Статус: 🟩 Workflow design completed
 - Комментарии: Дизайн WF_03_AI_PROFILE_AGENT готов. Миграция профилей подготовлена (002_profiles_schema.sql). Следующий шаг — реализация и тестирование в dev (импорт workflow, подготовка credentials, прогон миграции).
+
+## Этап 2.3 — Moderation
+- Статус: 🟩 Database design completed
+- Комментарии: Добавлены таблицы profile_moderation, moderation_rules, moderation_history и дизайн модерации оформлен в database/MODERATION_DESIGN.md.
