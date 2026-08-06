@@ -1,0 +1,40 @@
+# Docker compose (template)
+
+# Файл-заглушка docker-compose.yml для оркестрации сервисов MVP.
+# Этот файл — шаблон/спецификация и НЕ предназначен для немедленного запуска без доработки.
+
+version: '3.8'
+services:
+  # telegram-bot:
+  #   image: your-bot-image:latest
+  #   environment:
+  #     - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+  #   # добавить volumes, networks и т.д.
+
+  # webapp:
+  #   build: ../webapp
+  #   ports:
+  #     - "3000:3000"
+
+  # n8n:
+  #   image: n8nio/n8n:latest
+  #   environment:
+  #     - N8N_BASIC_AUTH_ACTIVE=true
+  #   ports:
+  #     - "5678:5678"
+
+  # db:
+  #   image: postgres:15
+  #   environment:
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=changeme
+  #   volumes:
+  #     - db-data:/var/lib/postgresql/data
+
+  # ai-agent:
+  #   image: your-ai-agent:latest
+
+#volumes:
+#  db-data:
+
+# Примечание: перед использованием заполнить реальные образы, секреты и параметры сети.
