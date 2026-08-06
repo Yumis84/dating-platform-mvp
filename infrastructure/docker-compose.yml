@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: mvp_postgres
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/migrations:/migrations:ro
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    networks:
+      - devnet
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: mvp_n8n
+    env_file:
+      - .env
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT}
+      - NODE_ENV=production
+    volumes:
+      - n8n_data:/home/node/.n8n
+      # Optional: mount workflows for easy import
+      - ./n8n/workflows:/data/workflows:ro
+    ports:
+      - "${N8N_PORT}:${N8N_PORT}"
+    depends_on:
+      - postgres
+    networks:
+      - devnet
+
+  migrator:
+    image: migrate/migrate:latest
+    container_name: mvp_migrator
+    entrypoint: ["/bin/sh","-c","sleep infinity"]
+    volumes:
+      - ./database/migrations:/migrations:ro
+    networks:
+      - devnet
+
+volumes:
+  pgdata:
+  n8n_data:
+
+networks:
+  devnet:
+    driver: bridge
