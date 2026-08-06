@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+
+# Node modules for frontend/backends
+node_modules/
+
+# Logs
+*.log
+
+# Sensitive directories
+credentials/
+secrets/
