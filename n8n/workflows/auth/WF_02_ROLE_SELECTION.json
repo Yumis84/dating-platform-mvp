@@ -10,11 +10,11 @@
       "name":"Extract input","type":"n8n-nodes-base.set","typeVersion":1,"position":[450,250]
     },
     {
-      "parameters":{"operation":"executeQuery","query":"-- Validate role and update user\nUPDATE users SET role = upper('{{ $json[\"role\"] }}'), updated_at = now() WHERE id = '{{ $json[\"user_id\"] }}' RETURNING id, role;"},
+      "parameters":{"operation":"executeQuery","query":"-- Validate role and update user\nUPDATE users SET role = upper('{{ $json[\\"role\\"] }}'), updated_at = now() WHERE id = '{{ $json[\\"user_id\\"] }}' RETURNING id, role;"},
       "name":"Update user role","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[650,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
     },
     {
-      "parameters":{"operation":"executeQuery","query":"INSERT INTO audit_events (user_id, event_type, event_data) VALUES ('{{ $json[\"user_id\"] }}', 'role_selection', jsonb_build_object('role','{{ $json[\"role\"] }}') );"},
+      "parameters":{"operation":"executeQuery","query":"INSERT INTO audit_events (user_id, event_type, event_data) VALUES ('{{ $json[\\"user_id\\"] }}', 'role_selection', jsonb_build_object('role','{{ $json[\\"role\\"] }}') );"},
       "name":"Create audit_event","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[850,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
     },
     {
