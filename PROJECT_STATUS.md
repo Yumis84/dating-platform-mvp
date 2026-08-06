@@ -29,3 +29,7 @@
 ## Этап 2.4 — AI Moderation
 - Статус: 🟩 AI Moderation workflow design completed
 - Комментарии: Добавлен WF_04_AI_MODERATION design (n8n workflow template) and documentation for AI moderation flow.
+
+## Этап 3 — Catalog
+- Статус: 🟩 Catalog design completed
+- Комментарии: Добавлены миграция 004_catalog_schema.sql, CATALOG_DESIGN.md, and n8n workflows WF_05_PROFILE_CATALOG and WF_06_PROFILE_VIEW (design + JSON templates).

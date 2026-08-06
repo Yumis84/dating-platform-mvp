@@ -1,0 +1,42 @@
+{
+  "name": "WF_06_PROFILE_VIEW",
+  "nodes": [
+    {
+      "parameters": {"httpMethod":"POST","path":"profile-view","responseMode":"onReceived","options":{}},
+      "name":"Webhook Trigger",
+      "type":"n8n-nodes-base.webhook",
+      "typeVersion":1,
+      "position":[250,250],
+      "credentials":{}
+    },
+    {
+      "parameters": {"values":{"string":[{"name":"viewer_user_id","value":"={{$json[\"body\"] && $json[\"body\"].viewer_user_id ? $json.body.viewer_user_id : null}}"},{"name":"profile_id","value":"={{$json[\"body\"] && $json[\"body\"].profile_id ? $json.body.profile_id : null}}"}]},"options":{}},
+      "name":"Extract input",
+      "type":"n8n-nodes-base.set",
+      "typeVersion":1,
+      "position":[450,250]
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"INSERT INTO profile_views (profile_id, viewer_user_id) VALUES ('{{ $json[\"profile_id\"] }}', {{ $json[\"viewer_user_id\"] ? '\'' || $json['viewer_user_id'] || '\'' : 'NULL' }});"},
+      "name":"Record view",
+      "type":"n8n-nodes-base.postgres",
+      "typeVersion":1,
+      "position":[650,250],
+      "credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"SELECT id, display_name AS name, age, city, avatar_file_id, description FROM profiles WHERE id = '{{ $json[\"profile_id\"] }}' AND status = 'ACTIVE';"},
+      "name":"Load profile",
+      "type":"n8n-nodes-base.postgres",
+      "typeVersion":1,
+      "position":[850,250],
+      "credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {"parameters":{"value":"={{$json[\"rows\"]}}","options":{"binaryData":false}},"name":"Prepare response","type":"n8n-nodes-base.set","typeVersion":1,"position":[1050,250]},
+    {"parameters":{"responseCode":200,"responseMode":"lastNode","options":{}},"name":"Respond to Webhook","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[1250,250],"credentials":{}}
+  ],
+  "connections":{"Webhook Trigger":{"main":[[{"node":"Extract input","type":"main","index":0}]]},"Extract input":{"main":[[{"node":"Record view","type":"main","index":0},{"node":"Load profile","type":"main","index":0}]]},"Load profile":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Prepare response":{"main":[[{"node":"Respond to Webhook","type":"main","index":0}]]}},
+  "active":false,
+  "settings":{},
+  "id":"WF_06_PROFILE_VIEW_0001"
+}
