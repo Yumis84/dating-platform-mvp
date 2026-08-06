@@ -1,0 +1,169 @@
+{
+  "name": "WF_03_AI_PROFILE_AGENT",
+  "nodes": [
+    {
+      "parameters": {
+        "updateMode": "polling",
+        "commands": []
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [250,250],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {"name":"telegram_id","value":"={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.id : ($json.update && $json.update.callback_query ? $json.update.callback_query.from.id : '')}}"},
+            {"name":"text","value":"={{$json[\"message\"] && $json[\"message\"].text ? $json.message.text : ($json.update && $json.update.callback_query ? $json.update.callback_query.data : '')}}"}
+          ],
+          "boolean": [],
+          "number": []
+        }
+      },
+      "name": "Extract input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450,250]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM profile_ai_sessions WHERE user_id = (SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}}) AND session_status = 'IN_PROGRESS' ORDER BY created_at DESC LIMIT 1;"
+      },
+      "name": "Find active session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650,250],
+      "credentials": {
+        "postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {"boolean": [],"number": [],"string": [{"value1":"={{$json[\"rows\"] && $json[\"rows\"].length > 0}}","operation":"equal"}]}
+      },
+      "name": "Has session?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850,250]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Create new profile_ai_sessions and initial profile draft\nINSERT INTO profile_ai_sessions (user_id, session_status, current_step, ai_context) VALUES ((SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}}), 'IN_PROGRESS', 0, '{}'::jsonb) RETURNING id;"
+      },
+      "name": "Create session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1050,120],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Load session context\nSELECT id, current_step, ai_context FROM profile_ai_sessions WHERE id = {{$json[\"rows\"][0] && $json[\"rows\"][0].id ? $json[\"rows\"][0].id : null}};"
+      },
+      "name": "Load session context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1050,320],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "resource": "chat.completions",
+        "temperature": 0.7,
+        "messages": "=[{\"role\":\"system\",\"content\":\"You are a helpful assistant that helps create dating profiles in Russian. Ask concise friendly questions and collect the following fields: display_name, age, city, district, description, additional_info.\"},{\"role\":\"user\",\"content\":{{$json[\"text\"]}}}]"
+      },
+      "name": "AI Agent",
+      "type": "n8n-nodes-base.openai",
+      "typeVersion": 1,
+      "position": [1250,250],
+      "credentials": {"openaiApi": {"id":"AI_CREDENTIAL_PLACEHOLDER","name":"AI_CREDENTIAL_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Persist AI context and advance step\nUPDATE profile_ai_sessions SET ai_context = COALESCE(ai_context, '{}'::jsonb) || to_jsonb($json[\"choices\"][0].message.content::text) , current_step = (COALESCE(current_step,0) + 1), updated_at = now() WHERE id = (SELECT id FROM profile_ai_sessions WHERE user_id = (SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}}) AND session_status = 'IN_PROGRESS' ORDER BY created_at DESC LIMIT 1);"
+      },
+      "name": "Save AI context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1450,250],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json[\"telegram_id\"]}}",
+        "text": "={{$json[\"choices\"] && $json[\"choices\"][0] && $json[\"choices\"][0].message ? $json[\"choices\"][0].message.content : 'Я готов задать следующий вопрос.'}}",
+        "options": {}
+      },
+      "name": "Send AI message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1650,250],
+      "credentials": {"telegramApi": {"id":"TELEGRAM_PLACEHOLDER","name":"TELEGRAM_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- On user confirmation, create or update profiles and set status to PENDING_MODERATION\nWITH u AS (SELECT id as user_id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}}), s AS (SELECT ai_context FROM profile_ai_sessions WHERE user_id = (SELECT user_id FROM u) AND session_status = 'IN_PROGRESS' ORDER BY created_at DESC LIMIT 1)
+INSERT INTO profiles (user_id, display_name, age, city, description, avatar_file_id, status, moderation_status) SELECT (SELECT user_id FROM u), (s.ai_context->>\'display_name\')::text, (s.ai_context->>\'age\')::int, (s.ai_context->>\'city\')::text, (s.ai_context->>\'description\')::text, (s.ai_context->>\'avatar_file_id\')::text, 'PENDING_MODERATION', 'PENDING' WHERE NOT EXISTS (SELECT 1 FROM profiles p JOIN u ON p.user_id = u.user_id);"},
+      "name": "Finalize profile",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1850,250],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"INSERT INTO audit_events (user_id, event_type, event_data) VALUES ((SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}}), 'profile_created', jsonb_build_object('note','profile created via AI'));"},
+      "name": "Create audit_event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [2050,250],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"chatId":"={{$json[\"telegram_id\"]}}","text":"Ваша анкета отправлена на модерацию. Спасибо!","options":{}},
+      "name":"Send completion message",
+      "type":"n8n-nodes-base.telegram",
+      "typeVersion":1,
+      "position":[2250,250],
+      "credentials":{"telegramApi":{"id":"TELEGRAM_PLACEHOLDER","name":"TELEGRAM_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- Mark session completed\nUPDATE profile_ai_sessions SET session_status = 'COMPLETED', updated_at = now() WHERE user_id = (SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}}) AND session_status = 'IN_PROGRESS';"},
+      "name":"Complete session",
+      "type":"n8n-nodes-base.postgres",
+      "typeVersion":1,
+      "position":[2450,250],
+      "credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {},
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1250,450]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {"main":[[{"node":"Extract input","type":"main","index":0}]]},
+    "Extract input": {"main":[[{"node":"Find active session","type":"main","index":0}]]},
+    "Find active session": {"main":[[{"node":"Has session?","type":"main","index":0}]]},
+    "Has session?": {"main":[[{"node":"Load session context","type":"main","index":0}], [{"node":"Create session","type":"main","index":0}]]},
+    "Create session": {"main":[[{"node":"AI Agent","type":"main","index":0}]]},
+    "Load session context": {"main":[[{"node":"AI Agent","type":"main","index":0}]]},
+    "AI Agent": {"main":[[{"node":"Save AI context","type":"main","index":0}, {"node":"Send AI message","type":"main","index":0}]]},
+    "Send AI message": {"main":[[{"node":"Finalize profile","type":"main","index":0}]]},
+    "Finalize profile": {"main":[[{"node":"Create audit_event","type":"main","index":0}]]},
+    "Create audit_event": {"main":[[{"node":"Send completion message","type":"main","index":0}]]},
+    "Send completion message": {"main":[[{"node":"Complete session","type":"main","index":0}]]},
+    "Save AI context": {"main":[[{"node":"Finalize profile","type":"main","index":0}]]}
+  },
+  "active": false,
+  "settings": {},
+  "id": "WF_03_AI_PROFILE_AGENT_0001"
+}

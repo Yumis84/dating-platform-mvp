@@ -19,5 +19,5 @@
 - WF_02 role selection: ✅
 
 ## Этап 2 — AI Profile
-- Статус: 🟨 DB design in progress
-- Комментарии: Проектирование схемы для AI‑ассистента создания анкеты (profiles, profile_photos, profile_ai_sessions, profile_fields_history). Миграция 002_profiles_schema.sql подготовлена.
+- Статус: 🟩 Workflow design completed
+- Комментарии: Дизайн WF_03_AI_PROFILE_AGENT готов. Миграция профилей подготовлена (002_profiles_schema.sql). Следующий шаг — реализация и тестирование в dev (импорт workflow, подготовка credentials, прогон миграции).
