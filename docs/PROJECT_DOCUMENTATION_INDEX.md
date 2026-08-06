@@ -61,6 +61,7 @@ TZ_13 MVP Launch
 ✅ telegram_accounts schema
 ✅ audit_events schema
 ✅ WF_01 registration design
+✅ WF_02_ROLE_SELECTION выполнен
 
 Следующий шаг:
 

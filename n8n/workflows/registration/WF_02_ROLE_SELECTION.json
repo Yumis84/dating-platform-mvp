@@ -1,0 +1,267 @@
+{
+  "name": "WF_02_ROLE_SELECTION",
+  "nodes": [
+    {
+      "parameters": {
+        "updateMode": "polling",
+        "commands": []
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [250, 250],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.id : $json.update.callback_query.from.id}}"
+            },
+            {
+              "name": "selected_role",
+              "value": "={{$json[\"message\"] && $json[\"message\"].text ? $json.message.text : ($json.update && $json.update.callback_query && $json.update.callback_query.data ? $json.update.callback_query.data : '')}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract selection",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450, 250]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}};"
+      },
+      "name": "Find user",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650, 250],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json[\"selected_role\"]}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "name": "Has selection?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 250]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users SET role = 'MAN', status = 'ACTIVE', updated_at = now() WHERE telegram_id = {{$json[\"telegram_id\"]}};"
+      },
+      "name": "Set role MAN",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1050, 160],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users SET role = 'WOMAN', status = 'ACTIVE', updated_at = now() WHERE telegram_id = {{$json[\"telegram_id\"]}};"
+      },
+      "name": "Set role WOMAN",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1050, 340],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_events (user_id, event_type, event_data) VALUES ((SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}}), 'role_selected_man', to_jsonb({\"role\": \"MAN\"}));"
+      },
+      "name": "Audit MAN",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1250, 160],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_events (user_id, event_type, event_data) VALUES ((SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}}), 'role_selected_woman', to_jsonb({\"role\": \"WOMAN\"}));"
+      },
+      "name": "Audit WOMAN",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1250, 340],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json[\"telegram_id\"]}}",
+        "text": "Отлично.\nТеперь вы можете просматривать анкеты и общаться.",
+        "options": {}
+      },
+      "name": "Send MAN response",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1450, 160],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json[\"telegram_id\"]}}",
+        "text": "Отлично.\nНачинаем создание вашей анкеты.\nAI-помощник задаст несколько вопросов.",
+        "options": {}
+      },
+      "name": "Send WOMAN response",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1450, 340],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract selection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract selection": {
+      "main": [
+        [
+          {
+            "node": "Find user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find user": {
+      "main": [
+        [
+          {
+            "node": "Has selection?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has selection?": {
+      "main": [
+        [
+          {
+            "node": "Set role MAN",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set role WOMAN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set role MAN": {
+      "main": [
+        [
+          {
+            "node": "Audit MAN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set role WOMAN": {
+      "main": [
+        [
+          {
+            "node": "Audit WOMAN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit MAN": {
+      "main": [
+        [
+          {
+            "node": "Send MAN response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit WOMAN": {
+      "main": [
+        [
+          {
+            "node": "Send WOMAN response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "WF_02_ROLE_SELECTION_0001"
+}
