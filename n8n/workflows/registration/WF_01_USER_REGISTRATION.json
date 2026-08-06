@@ -1,0 +1,272 @@
+{
+  "name": "WF_01_USER_REGISTRATION",
+  "nodes": [
+    {
+      "parameters": {
+        "updateMode": "polling",
+        "commands": [
+          {
+            "command": "/start",
+            "description": "Start registration"
+          }
+        ]
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.id : $json.update.message.from.id}}"
+            },
+            {
+              "name": "username",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.username : $json.update.message.from.username}}"
+            },
+            {
+              "name": "first_name",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.first_name : $json.update.message.from.first_name}}"
+            },
+            {
+              "name": "last_name",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.last_name : $json.update.message.from.last_name}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract User Info",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM users WHERE telegram_id = {{$json[\"telegram_id\"]}};"
+      },
+      "name": "Check user exists",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650, 220],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "value1": "={{ $json[\"rows\"] && $json[\"rows\"].length > 0 }}",
+              "operation": "equal"
+            }
+          ]
+        }
+      },
+      "name": "User exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE telegram_accounts SET last_login_at = now() WHERE telegram_id = {{$json[\"telegram_id\"]}};"
+      },
+      "name": "Update last_login",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1050, 200],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO users (telegram_id, username, first_name, last_name, role, status) VALUES ({{$json[\"telegram_id\"]}}, '{{'{{$json[\"username\"]}}'}}', '{{'{{$json[\"first_name\"]}}'}}', '{{'{{$json[\"last_name\"]}}'}}', 'man', 'active') RETURNING id;"
+      },
+      "name": "Create user",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1050, 380],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO telegram_accounts (user_id, telegram_id, init_data_hash, last_login_at) VALUES ({{$json[\"id\"] || $json[0] || ''}}, {{$json[\"telegram_id\"]}}, NULL, now());"
+      },
+      "name": "Create telegram_account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1250, 380],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_events (user_id, event_type, event_data) VALUES ({{$json[\"id\"] || $json[0] || 'NULL'}}, 'registration', to_jsonb({{"telegram_id": {{$json[\"telegram_id\"]}}}}));"
+      },
+      "name": "Create audit_event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1450, 380],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json[\"telegram_id\"]}}",
+        "text": "Добро пожаловать.\nВыберите роль.",
+        "options": {
+          "reply_markup": {
+            "keyboard": [[{"text": "👤 Мужчина"}, {"text": "👩 Девушка"}]],
+            "one_time_keyboard": true
+          }
+        }
+      },
+      "name": "Send welcome",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1650, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract User Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract User Info": {
+      "main": [
+        [
+          {
+            "node": "Check user exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check user exists": {
+      "main": [
+        [
+          {
+            "node": "User exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User exists?": {
+      "main": [
+        [
+          {
+            "node": "Update last_login",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create user": {
+      "main": [
+        [
+          {
+            "node": "Create telegram_account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create telegram_account": {
+      "main": [
+        [
+          {
+            "node": "Create audit_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create audit_event": {
+      "main": [
+        [
+          {
+            "node": "Send welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update last_login": {
+      "main": [
+        [
+          {
+            "node": "Send welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "WF_01_USER_REGISTRATION_0001"
+}
