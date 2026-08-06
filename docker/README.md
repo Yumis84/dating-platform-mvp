@@ -14,6 +14,17 @@ Services included
 
 All services are attached to a single named Docker network (dating_app_network) and use named volumes for persistent data.
 
+Quick start
+-----------
+1. Copy example env file and fill secrets (do NOT commit real secrets):
+   cp .env.example .env
+
+2. Start the stack (from repository root):
+   docker compose up -d
+
+3. Check services:
+   docker compose ps
+
 How to use
 ---------
 1. Copy example env file and fill secrets (do NOT commit real secrets):
