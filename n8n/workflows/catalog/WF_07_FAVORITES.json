@@ -1,0 +1,124 @@
+{
+  "name": "WF_07_FAVORITES",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "favorites",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250,250],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "values": {"string": [{"name": "user_id", "value": "={{$json[\"body\"] && $json[\"body\"].user_id ? $json.body.user_id : ''}}"}, {"name": "profile_id", "value": "={{$json[\"body\"] && $json[\"body\"].profile_id ? $json.body.profile_id : ''}}"}, {"name": "action", "value": "={{$json[\"body\"] && $json[\"body\"].action ? $json.body.action : 'TOGGLE'}}"]},
+        "options": {}
+      },
+      "name": "Extract input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450,250]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id FROM users WHERE id = '{{ $json[\"user_id\"] }}' LIMIT 1;"
+      },
+      "name": "Check user exists",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650,150],
+      "credentials": {"postgres": {"id": "POSTGRES_PLACEHOLDER", "name": "POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation": "executeQuery", "query": "SELECT id, status FROM profiles WHERE id = '{{ $json[\"profile_id\"] }}' LIMIT 1;"},
+      "name": "Load profile",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [650,350],
+      "credentials": {"postgres": {"id": "POSTGRES_PLACEHOLDER", "name": "POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"conditions": {"string": [{"value1": "={{ $json[\"rows\"] && $json[\"rows\"].length > 0 }}", "operation": "equal"}] }},
+      "name": "User exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850,150]
+    },
+    {
+      "parameters": {"conditions": {"string": [{"value1": "={{ $json[\"rows\"] && $json[\"rows\"].length > 0 }}", "operation": "equal"}] }},
+      "name": "Profile exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850,350]
+    },
+    {
+      "parameters": {"operation": "executeQuery", "query": "SELECT id FROM favorites WHERE user_id = '{{ $json[\"user_id\"] }}' AND profile_id = '{{ $json[\"profile_id\"] }}' LIMIT 1;"},
+      "name": "Check favorite exists",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1050,250],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation": "executeQuery","query": "INSERT INTO favorites (user_id, profile_id) VALUES ('{{ $json[\"user_id\"] }}', '{{ $json[\"profile_id\"] }}') ON CONFLICT (user_id, profile_id) DO NOTHING RETURNING id;"},
+      "name": "Add favorite",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1250,150],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation": "executeQuery","query": "DELETE FROM favorites WHERE user_id = '{{ $json[\"user_id\"] }}' AND profile_id = '{{ $json[\"profile_id\"] }}' RETURNING id;"},
+      "name": "Remove favorite",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1250,350],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation": "executeQuery","query": "INSERT INTO audit_events (user_id, event_type, event_data) VALUES ('{{ $json[\"user_id\"] }}', 'favorite_' || lower('{{ $json[\"action\"] }}'), jsonb_build_object('profile_id', '{{ $json[\"profile_id\"] }}', 'action', '{{ $json[\"action\"] }}'));"},
+      "name": "Create audit_event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1450,250],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"value": "={ \n  success: true,\n  favorite: ( ($json[\"rows\"] && $json[\"rows\"].length>0) || ($json[\"0\"] && $json[\"0\"].id) ) ? true : false\n}", "options": {"binaryData": false}},
+      "name": "Prepare response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1650,250]
+    },
+    {
+      "parameters": {"responseCode": 200, "responseMode": "lastNode", "options": {}},
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [1850,250],
+      "credentials": {}
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main": [[{"node": "Extract input", "type": "main", "index": 0}]]},
+    "Extract input": {"main": [[{"node": "Check user exists", "type": "main", "index": 0}, {"node": "Load profile", "type": "main", "index": 0}]]},
+    "Check user exists": {"main": [[{"node": "User exists?", "type": "main", "index": 0}]]},
+    "Load profile": {"main": [[{"node": "Profile exists?", "type": "main", "index": 0}]]},
+    "User exists?": {"main": [[{"node": "Check favorite exists", "type": "main", "index": 0}]]},
+    "Profile exists?": {"main": [[{"node": "Check favorite exists", "type": "main", "index": 0}]]},
+    "Check favorite exists": {"main": [[{"node": "Add favorite", "type": "main", "index": 0}, {"node": "Remove favorite", "type": "main", "index": 0}]]},
+    "Add favorite": {"main": [[{"node": "Create audit_event", "type": "main", "index": 0}, {"node": "Prepare response", "type": "main", "index": 0}]]},
+    "Remove favorite": {"main": [[{"node": "Create audit_event", "type": "main", "index": 0}, {"node": "Prepare response", "type": "main", "index": 0}]]},
+    "Create audit_event": {"main": [[{"node": "Prepare response", "type": "main", "index": 0}]]},
+    "Prepare response": {"main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {},
+  "id": "WF_07_FAVORITES_0001"
+}

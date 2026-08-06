@@ -33,3 +33,7 @@
 ## Этап 3 — Catalog
 - Статус: 🟩 Catalog design completed
 - Комментарии: Добавлены миграция 004_catalog_schema.sql, CATALOG_DESIGN.md, and n8n workflows WF_05_PROFILE_CATALOG and WF_06_PROFILE_VIEW (design + JSON templates).
+
+## Этап 3.1 — Catalog completed
+- Статус: 🟩 Completed
+- Комментарии: Добавлены favorites endpoint (WF_07), pagination and filters for WF_05, and API design documentation.
