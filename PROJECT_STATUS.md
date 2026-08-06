@@ -41,3 +41,7 @@
 ## Этап 4 — Anonymous Chat
 - Статус: 🟩 Chat architecture design completed
 - Комментарии: Добавлены chat schema (005_chat_schema.sql), CHAT_DESIGN.md and CHAT_FLOW.md describing flows, blocking and reporting.
+
+## Этап 4.1 — Chat n8n workflows
+- Статус: 🟩 Chat n8n workflow design completed
+- Комментарии: Добавлены templates for WF_08 (create session), WF_09 (message router), WF_10 (block/report) and CHAT_N8N_FLOW.md.

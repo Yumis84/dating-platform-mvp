@@ -1,0 +1,46 @@
+{
+  "name": "WF_08_CREATE_CHAT_SESSION",
+  "nodes": [
+    {
+      "parameters": {"httpMethod":"POST","path":"create-chat","responseMode":"onReceived","options":{}},
+      "name":"Webhook Trigger","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[250,250],"credentials":{}
+    },
+    {
+      "parameters": {"values":{"string":[{"name":"initiator_user_id","value":"={{$json[\"body\"] && $json[\"body\"].initiator_user_id ? $json.body.initiator_user_id : ''}},{"name":"profile_id","value":"={{$json[\"body\"] && $json[\"body\"].profile_id ? $json.body.profile_id : ''}}"]}},
+      "name":"Extract input","type":"n8n-nodes-base.set","typeVersion":1,"position":[450,250]
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"SELECT id, user_id as owner_user_id, status FROM profiles WHERE id = '{{ $json[\"profile_id\"] }}' LIMIT 1;"},
+      "name":"Load profile","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[650,200],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Check existing open chat between initiator and profile owner\nSELECT id FROM chat_sessions WHERE profile_id = '{{ $json[\"profile_id\"] }}' AND initiator_user_id = '{{ $json[\"initiator_user_id\"] }}' AND status = 'OPEN' LIMIT 1;"},
+      "name":"Check existing session","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[850,200],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Check if initiator is blocked by owner (global or session-level block)\nSELECT 1 FROM chat_blocks cb JOIN chat_sessions cs ON cb.chat_id = cs.id WHERE cs.profile_id = '{{ $json[\"profile_id\"] }}' AND cb.blocked_user_id = '{{ $json[\"initiator_user_id\"] }}' LIMIT 1;"},
+      "name":"Check blocks","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[850,360],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Create session (idempotent guard)\nWITH owner AS (SELECT user_id AS owner_user_id FROM profiles WHERE id = '{{ $json[\"profile_id\"] }}')\nINSERT INTO chat_sessions (profile_id, initiator_user_id, respondent_user_id, status)\nSELECT '{{ $json[\"profile_id\"] }}', '{{ $json[\"initiator_user_id\"] }}', owner.owner_user_id, 'OPEN' FROM owner\nWHERE NOT EXISTS (SELECT 1 FROM chat_sessions WHERE profile_id = '{{ $json[\"profile_id\"] }}' AND initiator_user_id = '{{ $json[\"initiator_user_id\"] }}' AND status = 'OPEN')\nRETURNING id;"},
+      "name":"Create session","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1050,200],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- If row exists, select existing id as fallback\nSELECT id FROM chat_sessions WHERE profile_id = '{{ $json[\"profile_id\"] }}' AND initiator_user_id = '{{ $json[\"initiator_user_id\"] }}' AND status = 'OPEN' LIMIT 1;"},
+      "name":"Select session fallback","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1250,200],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"INSERT INTO audit_events (user_id, event_type, event_data) VALUES ('{{ $json[\"initiator_user_id\"] }}', 'chat_session_create', jsonb_build_object('profile_id','{{ $json[\"profile_id\"] }}') );"},
+      "name":"Create audit_event","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1450,200],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"value":"={{ { chat_id: ($node[\"Create session\"].json[0] && $node[\"Create session\"].json[0].id) ? $node[\"Create session\"].json[0].id : ($node[\"Select session fallback\"].json[0] && $node[\"Select session fallback\"].json[0].id) ? $node[\"Select session fallback\"].json[0].id : null } }}","options":{"binaryData":false}},
+      "name":"Prepare response","type":"n8n-nodes-base.set","typeVersion":1,"position":[1650,200]
+    },
+    {"parameters":{"responseCode":200,"responseMode":"lastNode","options":{}},"name":"Respond to Webhook","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[1850,200],"credentials":{}}
+  ],
+  "connections":{"Webhook Trigger":{"main":[[{"node":"Extract input","type":"main","index":0}]]},"Extract input":{"main":[[{"node":"Load profile","type":"main","index":0},{"node":"Check existing session","type":"main","index":0},{"node":"Check blocks","type":"main","index":0}]]},"Load profile":{"main":[[{"node":"Check existing session","type":"main","index":0}]]},"Check existing session":{"main":[[{"node":"Create session","type":"main","index":0}]]},"Create session":{"main":[[{"node":"Select session fallback","type":"main","index":0},{"node":"Create audit_event","type":"main","index":0}]]},"Select session fallback":{"main":[[{"node":"Create audit_event","type":"main","index":0}]]},"Create audit_event":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Prepare response":{"main":[[{"node":"Respond to Webhook","type":"main","index":0}]]}},
+  "active":false,
+  "settings":{},
+  "id":"WF_08_CREATE_CHAT_SESSION_0001"
+}

@@ -1,0 +1,43 @@
+{
+  "name": "WF_10_CHAT_BLOCK_REPORT",
+  "nodes": [
+    {
+      "parameters": {"httpMethod":"POST","path":"chat-block-report","responseMode":"onReceived","options":{}},
+      "name":"Webhook Trigger","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[250,250],"credentials":{}
+    },
+    {
+      "parameters":{"values":{"string":[{"name":"reporter_user_id","value":"={{$json[\"body\"] && $json[\"body\"].reporter_user_id ? $json.body.reporter_user_id : ''}}"},{"name":"chat_id","value":"={{$json[\"body\"] && $json[\"body\"].chat_id ? $json.body.chat_id : ''}}"},{"name":"action","value":"={{$json[\"body\"] && $json[\"body\"].action ? $json.body.action : 'REPORT'}}"},{"name":"reason","value":"={{$json[\"body\"] && $json[\"body\"].reason ? $json.body.reason : ''}}"}]},"options":{}},
+      "name":"Extract input","type":"n8n-nodes-base.set","typeVersion":1,"position":[450,250]
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"SELECT id, initiator_user_id, respondent_user_id FROM chat_sessions WHERE id = '{{ $json[\"chat_id\"] }}' LIMIT 1;"},
+      "name":"Load chat","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[650,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Insert block record\nINSERT INTO chat_blocks (chat_id, blocker_user_id, blocked_user_id, reason)\nSELECT '{{ $json[\"chat_id\"] }}', '{{ $json[\"reporter_user_id\"] }}',\nCASE WHEN initiator_user_id = '{{ $json[\"reporter_user_id\"] }}' THEN respondent_user_id ELSE initiator_user_id END, '{{ $json[\"reason\"] }}' FROM chat_sessions WHERE id = '{{ $json[\"chat_id\"] }}' RETURNING id;"},
+      "name":"Insert block","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[850,150],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Close or block chat_session\nUPDATE chat_sessions SET status = 'BLOCKED', updated_at = now() WHERE id = '{{ $json[\"chat_id\"] }}';"},
+      "name":"Block session","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1050,150],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Create report record (for REPORT action)\nINSERT INTO chat_reports (chat_id, reporter_user_id, reported_user_id, report_type, comment, report_data)\nSELECT '{{ $json[\"chat_id\"] }}', '{{ $json[\"reporter_user_id\"] }}', CASE WHEN initiator_user_id = '{{ $json[\"reporter_user_id\"] }}' THEN respondent_user_id ELSE initiator_user_id END, '{{ $json[\"reason\"] }}', '{{ $json[\"reason\"] }}', jsonb_build_object('context', (SELECT jsonb_agg(row_to_json(m)) FROM (SELECT id, sender_id, content, created_at FROM messages WHERE chat_id = '{{ $json[\"chat_id\"] }}' ORDER BY created_at DESC LIMIT 20) m)) FROM chat_sessions WHERE id = '{{ $json[\"chat_id\"] }}' RETURNING id;"},
+      "name":"Insert report","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1050,350],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"INSERT INTO audit_events (user_id, event_type, event_data) VALUES ('{{ $json[\"reporter_user_id\"] }}', 'chat_block_or_report', jsonb_build_object('chat_id','{{ $json[\"chat_id\"] }}','action','{{ $json[\"action\"] }}','reason','{{ $json[\"reason\"] }}') );"},
+      "name":"Create audit_event","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1250,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"chatId":"MODERATION_CHAT_PLACEHOLDER","text":"Chat {{ $json[\"chat_id\"] }} reported/blocked by {{ $json[\"reporter_user_id\"] }}. Action: {{ $json[\"action\"] }} Reason: {{ $json[\"reason\"] }}","options":{}},
+      "name":"Notify moderation (Telegram)","type":"n8n-nodes-base.telegram","typeVersion":1,"position":[1450,350],"credentials":{"telegramApi":{"id":"TELEGRAM_PLACEHOLDER","name":"TELEGRAM_PLACEHOLDER"}}
+    },
+    {"parameters":{"value":"={ success: true }","options":{"binaryData":false}},"name":"Prepare response","type":"n8n-nodes-base.set","typeVersion":1,"position":[1650,250]},
+    {"parameters":{"responseCode":200,"responseMode":"lastNode","options":{}},"name":"Respond to Webhook","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[1850,250],"credentials":{}}
+  ],
+  "connections":{"Webhook Trigger":{"main":[[{"node":"Extract input","type":"main","index":0}]]},"Extract input":{"main":[[{"node":"Load chat","type":"main","index":0}]]},"Load chat":{"main":[[{"node":"Insert block","type":"main","index":0},{"node":"Insert report","type":"main","index":0}]]},"Insert block":{"main":[[{"node":"Block session","type":"main","index":0},{"node":"Create audit_event","type":"main","index":0}]]},"Insert report":{"main":[[{"node":"Create audit_event","type":"main","index":0},{"node":"Notify moderation (Telegram)","type":"main","index":0}]]},"Block session":{"main":[[{"node":"Create audit_event","type":"main","index":0}]]},"Create audit_event":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Notify moderation (Telegram)":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Prepare response":{"main":[[{"node":"Respond to Webhook","type":"main","index":0}]]}},
+  "active":false,
+  "settings":{},
+  "id":"WF_10_CHAT_BLOCK_REPORT_0001"
+}

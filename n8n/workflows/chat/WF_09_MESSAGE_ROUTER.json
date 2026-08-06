@@ -1,0 +1,55 @@
+{
+  "name": "WF_09_MESSAGE_ROUTER",
+  "nodes": [
+    {
+      "parameters": {"httpMethod":"POST","path":"chat-message","responseMode":"onReceived","options":{}},
+      "name":"Webhook Trigger","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[250,250],"credentials":{}
+    },
+    {
+      "parameters":{"values":{"string":[{"name":"sender_user_id","value":"={{$json[\"body\"] && $json[\"body\"].sender_user_id ? $json.body.sender_user_id : ''}}"},{"name":"chat_id","value":"={{$json[\"body\"] && $json[\"body\"].chat_id ? $json.body.chat_id : ''}}"},{"name":"content","value":"={{$json[\"body\"] && $json[\"body\"].content ? $json.body.content : ''}}"},{"name":"content_type","value":"={{$json[\"body\"] && $json[\"body\"].content_type ? $json.body.content_type : 'text'}}"},{"name":"dedup_key","value":"={{$json[\"body\"] && $json[\"body\"].dedup_key ? $json.body.dedup_key : ''}}"}]}} ,
+      "name":"Extract input","type":"n8n-nodes-base.set","typeVersion":1,"position":[450,250]
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Resolve chat if chat_id not provided\nSELECT * FROM chat_sessions WHERE id = '{{ $json[\"chat_id\"] }}' LIMIT 1;"},
+      "name":"Load chat by id","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[650,150],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- If chat_id missing, try to find active session for sender and profile_id passed in body.profile_id\nSELECT * FROM chat_sessions WHERE initiator_user_id = '{{ $json[\"sender_user_id\"] }}' AND profile_id = ({{ $json[\"body\"].profile_id ? '\'' || $json['body']['profile_id'] || '\'' : 'NULL' }}) AND status = 'OPEN' LIMIT 1;"},
+      "name":"Resolve chat fallback","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[650,350],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Ensure chat is OPEN\nSELECT id, status FROM chat_sessions WHERE id = '{{ $json[\"chat_id\"] }}' AND status = 'OPEN' LIMIT 1;"},
+      "name":"Check chat OPEN","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[850,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Check blocks where sender is blocked in this chat\nSELECT 1 FROM chat_blocks cb WHERE cb.chat_id = '{{ $json[\"chat_id\"] }}' AND cb.blocked_user_id = '{{ $json[\"sender_user_id\"] }}' LIMIT 1;"},
+      "name":"Check blocks","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1050,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Rate limit: count messages from sender in last 60 seconds across sessions (simple heuristic)\nSELECT count(*) as cnt FROM messages WHERE sender_id = '{{ $json[\"sender_user_id\"] }}' AND created_at > now() - interval '60 seconds';"},
+      "name":"Rate limit check","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1250,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Persist message only if not duplicate (dedup_key)\nINSERT INTO messages (chat_id, sender_id, content, content_type, metadata)\nSELECT '{{ $json[\"chat_id\"] }}', '{{ $json[\"sender_user_id\"] }}', '{{ $json[\"content\"] }}', '{{ $json[\"content_type\"] }}', jsonb_build_object('dedup_key', '{{ $json[\"dedup_key\"] }}')\nWHERE NOT EXISTS (SELECT 1 FROM messages m WHERE (m.metadata->>\'dedup_key\') = '{{ $json[\"dedup_key\"] }}' AND '{{ $json[\"dedup_key\"] }}' != '')\nRETURNING id, created_at;"},
+      "name":"Persist message","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1450,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Update chat_sessions.last_message_at\nUPDATE chat_sessions SET last_message_at = now(), updated_at = now() WHERE id = '{{ $json[\"chat_id\"] }}';"},
+      "name":"Update session activity","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1650,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"chatId":"={{$json[\"body\"] && $json[\"body\"].target_telegram_chat ? $json.body.target_telegram_chat : 'ADMIN_CHAT_PLACEHOLDER'}}","text":"={{ 'New message in chat ' + $json[\"chat_id\"] + ' (from user alias). Content: ' + ($json[\"content\"] || '') }}","options":{}},
+      "name":"Forward to recipient (Telegram)","type":"n8n-nodes-base.telegram","typeVersion":1,"position":[1850,250],"credentials":{"telegramApi":{"id":"TELEGRAM_PLACEHOLDER","name":"TELEGRAM_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"INSERT INTO audit_events (user_id, event_type, event_data) VALUES ('{{ $json[\"sender_user_id\"] }}', 'chat_message_sent', jsonb_build_object('chat_id','{{ $json[\"chat_id\"] }}','dedup_key','{{ $json[\"dedup_key\"] }}'));"},
+      "name":"Create audit_event","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[2050,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {"parameters":{"value":"={ success: true, delivered: ($node[\"Persist message\"].json[0] && $node[\"Persist message\"].json[0].id) ? true : false }","options":{"binaryData":false}},"name":"Prepare response","type":"n8n-nodes-base.set","typeVersion":1,"position":[2250,250]},
+    {"parameters":{"responseCode":200,"responseMode":"lastNode","options":{}},"name":"Respond to Webhook","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[2450,250],"credentials":{}}
+  ],
+  "connections":{"Webhook Trigger":{"main":[[{"node":"Extract input","type":"main","index":0}]]},"Extract input":{"main":[[{"node":"Load chat by id","type":"main","index":0},{"node":"Resolve chat fallback","type":"main","index":0}]]},"Load chat by id":{"main":[[{"node":"Check chat OPEN","type":"main","index":0}]]},"Resolve chat fallback":{"main":[[{"node":"Check chat OPEN","type":"main","index":0}]]},"Check chat OPEN":{"main":[[{"node":"Check blocks","type":"main","index":0},{"node":"Rate limit check","type":"main","index":0}]]},"Check blocks":{"main":[[{"node":"Persist message","type":"main","index":0}]]},"Rate limit check":{"main":[[{"node":"Persist message","type":"main","index":0}]]},"Persist message":{"main":[[{"node":"Update session activity","type":"main","index":0},{"node":"Forward to recipient (Telegram)","type":"main","index":0},{"node":"Create audit_event","type":"main","index":0}]]},"Update session activity":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Forward to recipient (Telegram)":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Create audit_event":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Prepare response":{"main":[[{"node":"Respond to Webhook","type":"main","index":0}]]}},
+  "active":false,
+  "settings":{},
+  "id":"WF_09_MESSAGE_ROUTER_0001"
+}

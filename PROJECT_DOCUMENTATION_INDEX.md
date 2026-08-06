@@ -4,7 +4,7 @@
 
 Главный документ:
 
-docs/tz/00_ARCHITECTURE/00_Glavnoe_TZ_Arhitektura_platformy_znakomstv_MVP_v1.0
+docs/tz/00_ARCHITECTURA/00_Glavnoe_TZ_Arhitektura_platformy_znakomstv_MVP_v1.0
 
 Все изменения архитектуры должны сначала согласовываться с главным ТЗ.
 
@@ -94,6 +94,14 @@ TZ_13 MVP Launch
 Выполнено:
 
 ✅ Chat architecture design completed
+
+Этап 4.1 Chat n8n workflows
+
+Выполнено:
+
+✅ WF_08 Create Chat Session
+✅ WF_09 Message Router
+✅ WF_10 Chat Block & Report
 
 ### Архитектура-папка
 
