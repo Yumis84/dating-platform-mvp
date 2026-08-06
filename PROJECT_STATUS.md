@@ -49,3 +49,7 @@
 ## Этап 4.2 — Chat reliability
 - Статус: 🟩 Chat reliability architecture completed
 - Комментарии: Добавлены delivery queue, rate limits, moderation events and a WF_11 worker design for reliable delivery and retries.
+
+## Этап 4.3 — AI message moderation
+- Статус: 🟩 AI chat moderation design completed
+- Комментарии: Added message_moderation_queue, WF_12 AI moderation workflow and documentation for moderation flows.

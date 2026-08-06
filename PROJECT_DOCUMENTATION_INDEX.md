@@ -109,6 +109,12 @@ TZ_13 MVP Launch
 
 ✅ Delivery queue, rate limits, moderation events and WF_11 Message Delivery Worker design
 
+Этап 4.3 AI message moderation
+
+Выполнено:
+
+✅ Message moderation queue and WF_12 AI moderation workflow design
+
 ### Архитектура-папка
 
 Главное ТЗ и связанная архитектурная документация расположены в:

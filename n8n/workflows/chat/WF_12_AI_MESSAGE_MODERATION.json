@@ -1,0 +1,67 @@
+{
+  "name": "WF_12_AI_MESSAGE_MODERATION",
+  "nodes": [
+    {
+      "parameters": {"httpMethod":"POST","path":"ai-moderate-message","responseMode":"onReceived","options":{}},
+      "name":"Webhook Trigger","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[250,250],"credentials":{}
+    },
+    {
+      "parameters":{"values":{"string":[{"name":"message_id","value":"={{$json[\"body\"] && $json[\"body\"].message_id ? $json.body.message_id : ''}}"}]},"options":{}},
+      "name":"Extract input","type":"n8n-nodes-base.set","typeVersion":1,"position":[450,250]
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"SELECT id, chat_id, sender_id, content, metadata FROM messages WHERE id = '{{ $json[\"message_id\"] }}' LIMIT 1;"},
+      "name":"Load message","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[650,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"requestMethod":"POST","url":"={{ 'https://api.moderation.example/v1/check' }}","options":{"headers":{"Content-Type":"application/json"}},"bodyParametersUi":{"parameterValues":[{"name":"text","value":"={{ $node[\"Load message\"].json[0].content }}"},{"name":"message_id","value":"={{ $json[\"message_id\"] }}"}]},"queryParametersUi":{"parameterValues":[]}},
+      "name":"Call AI Moderation API","type":"n8n-nodes-base.httpRequest","typeVersion":1,"position":[850,250],"credentials":{}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Upsert moderation result into message_moderation_queue\nINSERT INTO message_moderation_queue (message_id, chat_id, status, ai_score, flags, reason, processed_by, created_at, updated_at)\nVALUES ('{{ $json[\"message_id\"] }}', '{{ $node[\"Load message\"].json[0].chat_id }}', '{{ $json[\"verdict\"] || ($json[\"body\"] && $json[\"body\"].verdict) || 'PENDING' }}', {{ $json[\"score\"] || ($json[\"body\"] && $json[\"body\"].score) || 'NULL' }}, ({{ $json[\"flags\"] || ($json[\"body\"] && JSON.stringify($json[\"body\"]..flags)) || 'NULL' }} )::jsonb, '{{ $json[\"reason\"] || ($json[\"body\"] && $json[\"body\"].reason) || '' }}', 'ai', now(), now())\nON CONFLICT (message_id) DO UPDATE SET status = EXCLUDED.status, ai_score = EXCLUDED.ai_score, flags = EXCLUDED.flags, reason = EXCLUDED.reason, processed_by = EXCLUDED.processed_by, updated_at = now();"},
+      "name":"Save moderation result","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1050,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- Branch: handle BLOCKED verdict (create chat_report and audit)\nINSERT INTO chat_reports (chat_id, reporter_user_id, reported_user_id, report_type, comment, report_data, created_at)\nSELECT '{{ $node[\"Load message\"].json[0].chat_id }}', NULL, '{{ $node[\"Load message\"].json[0].sender_id }}', 'auto_moderation', 'Message blocked by AI: ' || ({{ $json[\"reason\"] || ($json[\"body\"] && $json[\"body\"].reason) || '' }}), jsonb_build_object('message_id','{{ $json[\"message_id\"] }}','flags', ({{ $json[\"flags\"] || ($json[\"body\"] && JSON.stringify($json[\"body\"]..flags)) || 'null' }} )::jsonb)\nWHERE '{{ $json[\"verdict\"] || ($json[\"body\"] && $json[\"body\"].verdict) || 'PENDING' }}' = 'BLOCKED' RETURNING id;"},
+      "name":"Handle BLOCKED","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1250,150],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- For REVIEW: notify moderators with context (last 20 messages)\nSELECT jsonb_agg(row_to_json(m)) as context FROM (SELECT id, sender_id, content, created_at FROM messages WHERE chat_id = '{{ $node[\"Load message\"].json[0].chat_id }}' ORDER BY created_at DESC LIMIT 20) m;"},
+      "name":"Prepare review context","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1250,350],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"chatId":"MODERATION_CHAT_PLACEHOLDER","text":"Message {{ $json[\"message_id\"] }} requires review. Context: {{ $node[\"Prepare review context\"].json[0].context }}","options":{}},
+      "name":"Notify moderator (Telegram)",
+      "type":"n8n-nodes-base.telegram",
+      "typeVersion":1,
+      "position":[1450,350],
+      "credentials":{"telegramApi":{"id":"TELEGRAM_PLACEHOLDER","name":"TELEGRAM_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"-- If APPROVED: insert into message_delivery_queue for delivery\nINSERT INTO message_delivery_queue (message_id, status, attempts, scheduled_at, created_at)\nSELECT '{{ $json[\"message_id\"] }}', 'PENDING', 0, now(), now()\nWHERE '{{ $json[\"verdict\"] || ($json[\"body\"] && $json[\"body\"].verdict) || 'PENDING' }}' = 'APPROVED'\nRETURNING id;"},
+      "name":"Enqueue for delivery","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1250,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters":{"operation":"executeQuery","query":"INSERT INTO audit_events (user_id, event_type, event_data) VALUES (NULL, 'ai_moderation_result', jsonb_build_object('message_id','{{ $json[\"message_id\"] }}','verdict','{{ $json[\"verdict\"] || ($json[\"body\"] && $json[\"body\"].verdict) || 'PENDING' }}','score', ({{ $json[\"score\"] || ($json[\"body\"] && $json[\"body\"].score) || 'NULL' }} ) ));"},
+      "name":"Create audit_event","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1450,250],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {"parameters":{"value":"={ success: true }","options":{"binaryData":false}},"name":"Prepare response","type":"n8n-nodes-base.set","typeVersion":1,"position":[1650,250]},
+    {"parameters":{"responseCode":200,"responseMode":"lastNode","options":{}},"name":"Respond","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[1850,250],"credentials":{}}
+  ],
+  "connections":{
+    "Webhook Trigger":{"main":[[{"node":"Extract input","type":"main","index":0}]]},
+    "Extract input":{"main":[[{"node":"Load message","type":"main","index":0}]]},
+    "Load message":{"main":[[{"node":"Call AI Moderation API","type":"main","index":0}]]},
+    "Call AI Moderation API":{"main":[[{"node":"Save moderation result","type":"main","index":0}]]},
+    "Save moderation result":{"main":[[{"node":"Enqueue for delivery","type":"main","index":0},{"node":"Handle BLOCKED","type":"main","index":0},{"node":"Prepare review context","type":"main","index":0},{"node":"Create audit_event","type":"main","index":0}]]},
+    "Prepare review context":{"main":[[{"node":"Notify moderator (Telegram)","type":"main","index":0}]]},
+    "Enqueue for delivery":{"main":[[{"node":"Create audit_event","type":"main","index":0}]]},
+    "Handle BLOCKED":{"main":[[{"node":"Create audit_event","type":"main","index":0}]]},
+    "Notify moderator (Telegram)":{"main":[[{"node":"Create audit_event","type":"main","index":0}]]},
+    "Create audit_event":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},
+    "Prepare response":{"main":[[{"node":"Respond","type":"main","index":0}]]}
+  },
+  "active":false,
+  "settings":{},
+  "id":"WF_12_AI_MESSAGE_MODERATION_0001"
+}
