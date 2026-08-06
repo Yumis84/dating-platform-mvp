@@ -1,0 +1,74 @@
+{
+  "name": "WF_11_MESSAGE_DELIVERY_WORKER",
+  "nodes": [
+    {
+      "parameters": {"mode":"everyMinute","options":{}},
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250,250],
+      "credentials": {}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"SELECT mdq.id AS queue_id, mdq.message_id, mdq.attempts, mdq.last_error, mdq.scheduled_at, m.content, m.metadata FROM message_delivery_queue mdq JOIN messages m ON m.id = mdq.message_id WHERE mdq.status = 'PENDING' AND mdq.scheduled_at <= now() ORDER BY mdq.scheduled_at ASC LIMIT 50;"},
+      "name": "Fetch pending deliveries",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [450,250],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {},
+      "name": "Split into batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [650,250]
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- Resolve delivery target (example: metadata->>'target_chat_id')\nSELECT (m.metadata->>\'target_chat_id\') AS target_chat_id FROM messages m WHERE m.id = '{{ $json[\"message_id\"] }}';"},
+      "name": "Resolve target chat",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [850,250],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"chatId":"={{ $json[\"rows\"] && $json[\"rows\"][0] && $json[\"rows\"][0].target_chat_id ? $json.rows[0].target_chat_id : 'ADMIN_CHAT_PLACEHOLDER' }}","text":"={{ $json[\"content\"] }}","options":{}},
+      "name": "Send via Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1050,250],
+      "credentials": {"telegramApi": {"id":"TELEGRAM_PLACEHOLDER","name":"TELEGRAM_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- On success: mark queue SENT and set sent_at\nUPDATE message_delivery_queue SET status = 'SENT', attempts = attempts + 1, sent_at = now() WHERE id = '{{ $json[\"queue_id\"] }}';"},
+      "name": "Mark SENT",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1250,200],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"-- On failure: increment attempts and schedule next try or mark FAILED after max attempts\nWITH q AS (SELECT attempts FROM message_delivery_queue WHERE id = '{{ $json[\"queue_id\"] }}')\nUPDATE message_delivery_queue SET attempts = q.attempts + 1, last_error = '{{ $json[\"error\"] || '' }}', scheduled_at = now() + interval '5 minutes' WHERE id = '{{ $json[\"queue_id\"] }}' AND q.attempts < 5;\n\n-- If attempts >= 5, mark FAILED\nUPDATE message_delivery_queue SET status = 'FAILED', last_error = '{{ $json[\"error\"] || '' }}' WHERE id = '{{ $json[\"queue_id\"] }}' AND (SELECT attempts FROM message_delivery_queue WHERE id = '{{ $json[\"queue_id\"] }}') >= 5;"},
+      "name": "Handle failure",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1250,300],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {
+      "parameters": {"operation":"executeQuery","query":"INSERT INTO audit_events (user_id, event_type, event_data) VALUES (NULL, 'message_delivery_attempt', jsonb_build_object('queue_id','{{ $json[\"queue_id\"] }}','message_id','{{ $json[\"message_id\"] }}','status', (CASE WHEN (SELECT status FROM message_delivery_queue WHERE id = '{{ $json[\"queue_id\"] }}') = 'SENT' THEN 'SENT' ELSE (CASE WHEN (SELECT status FROM message_delivery_queue WHERE id = '{{ $json[\"queue_id\"] }}') = 'FAILED' THEN 'FAILED' ELSE 'RETRY' END) END) ));"},
+      "name": "Create audit_event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1450,250],
+      "credentials": {"postgres": {"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+    },
+    {"parameters":{"value":"={ success: true }","options":{"binaryData":false}},"name":"Prepare response","type":"n8n-nodes-base.set","typeVersion":1,"position":[1650,250]},
+    {"parameters":{"responseCode":200,"responseMode":"lastNode","options":{}},"name":"Finish","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[1850,250],"credentials":{}}
+  ],
+  "connections": {"Cron Trigger":{"main":[[{"node":"Fetch pending deliveries","type":"main","index":0}]]},"Fetch pending deliveries":{"main":[[{"node":"Split into batches","type":"main","index":0}]]},"Split into batches":{"main":[[{"node":"Resolve target chat","type":"main","index":0}]]},"Resolve target chat":{"main":[[{"node":"Send via Telegram","type":"main","index":0}]]},"Send via Telegram":{"main":[[{"node":"Mark SENT","type":"main","index":0}], [{"node":"Handle failure","type":"main","index":0}]]},"Mark SENT":{"main":[[{"node":"Create audit_event","type":"main","index":0}]]},"Handle failure":{"main":[[{"node":"Create audit_event","type":"main","index":0}]]},"Create audit_event":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Prepare response":{"main":[[{"node":"Finish","type":"main","index":0}]]}},
+  "active":false,
+  "settings":{},
+  "id":"WF_11_MESSAGE_DELIVERY_WORKER_0001"
+}

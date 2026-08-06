@@ -103,6 +103,12 @@ TZ_13 MVP Launch
 ✅ WF_09 Message Router
 ✅ WF_10 Chat Block & Report
 
+Этап 4.2 Chat reliability
+
+Выполнено:
+
+✅ Delivery queue, rate limits, moderation events and WF_11 Message Delivery Worker design
+
 ### Архитектура-папка
 
 Главное ТЗ и связанная архитектурная документация расположены в:

@@ -45,3 +45,7 @@
 ## Этап 4.1 — Chat n8n workflows
 - Статус: 🟩 Chat n8n workflow design completed
 - Комментарии: Добавлены templates for WF_08 (create session), WF_09 (message router), WF_10 (block/report) and CHAT_N8N_FLOW.md.
+
+## Этап 4.2 — Chat reliability
+- Статус: 🟩 Chat reliability architecture completed
+- Комментарии: Добавлены delivery queue, rate limits, moderation events and a WF_11 worker design for reliable delivery and retries.
