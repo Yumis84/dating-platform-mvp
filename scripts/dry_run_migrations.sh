@@ -71,12 +71,12 @@ log_info() {
 
 log_success() {
   echo -e "${GREEN}[PASS]${NC} $1"
-  ((PASS_COUNT++))
+  ((++PASS_COUNT))
 }
 
 log_error() {
   echo -e "${RED}[FAIL]${NC} $1"
-  ((FAIL_COUNT++))
+  ((++FAIL_COUNT))
 }
 
 log_warning() {
@@ -159,7 +159,7 @@ until docker exec "${CONTAINER_NAME}" pg_isready -U "${DB_USER}" -d "${DB_NAME}"
     exit 1
   fi
   sleep 1
-  ((RETRY++))
+  ((++RETRY))
 done
 
 log_success "PostgreSQL is ready"
@@ -181,7 +181,7 @@ log_section "Applying Canonical Migrations"
 
 MIGRATION_NUM=0
 for migration in "${CANONICAL_MIGRATIONS[@]}"; do
-  ((MIGRATION_NUM++))
+  ((++MIGRATION_NUM))
   migration_file="${MIGRATIONS_DIR}/${migration}"
   
   log_info "[${MIGRATION_NUM}/8] Applying ${migration}..."
