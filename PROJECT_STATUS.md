@@ -17,6 +17,7 @@
 - audit_events schema: ✅
 - WF_01 registration design: ✅
 - WF_02 role selection: ✅
+- WF_03 AI profile agent: ✅
 
 ## Этап 2 — AI Profile
 - Статус: 🟩 Workflow design completed
