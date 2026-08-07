@@ -11,6 +11,9 @@
 3. [../PROJECT_STATUS.md](../PROJECT_STATUS.md) — текущий прогресс  
 4. [../AI_CONTEXT.md](../AI_CONTEXT.md) — handover snapshot для агентов  
 5. [tz/README.md](./tz/README.md) — комплект ТЗ  
+6. [docs/MIGRATION_MANIFEST.md](./MIGRATION_MANIFEST.md) — canonical migration order and reconciliation plan
+7. [database/MIGRATION_POLICY.md](../database/MIGRATION_POLICY.md) — migration policy and safety rules
+8. [docs/IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md) — developer pre-run checklist (Postgres, n8n, smoke)
 
 ---
 

@@ -14,12 +14,11 @@ Before the first full developer run of the system, ensure the following steps ar
 
 3) Apply canonical migrations
 - Use `docs/MIGRATION_MANIFEST.md` for the canonical order.
-  - Canonical migration manifest is provided by PR #2.
   - Operational rules for applying migrations: `database/MIGRATION_POLICY.md`.
 - Prefer copying canonical migrations to a temporary directory (e.g., `migrations_apply/`) and run migrator on that directory to avoid accidental application of conflicting files.
 - Apply migrations in order 001..007 (canonical set only). Confirm no errors.
 - If reconciliation is required (legacy data present), prepare and run `008_reconcile_users_and_audit.sql` (planned).
-- Ensure `audit_events` exists before smoke tests that write audit rows (see MIGRATION_POLICY / PR #2).
+- Ensure `audit_events` exists before smoke tests that write audit rows (see database/MIGRATION_POLICY.md and docs/MIGRATION_MANIFEST.md).
 
 4) Configure n8n and credentials
 - Deploy n8n (local container or service).

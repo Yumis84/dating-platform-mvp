@@ -4,7 +4,7 @@
 Статус: **канонический порядок миграций (документация)**  
 Источник аудита: `docs/MIGRATION_AUDIT_REPORT.md`, `docs/PROJECT_CONSISTENCY_REPORT.md`  
 
-> Этот файл **не изменяет** SQL. Он фиксирует, *какой* набор миграций считать рабочим и *как* безопасно разрешить конфликт `001_*`.
+> Этот файл **не изменяет** SQL. Он фиксирует, *какой* набор миграций считать рабочим и *как* безопасно разрешить [...]
 
 ---
 
@@ -33,19 +33,19 @@
 Каноническая модель проекта (AI_CONTEXT, PROJECT_CONTEXT, WF design):
 
 1. **`telegram_id` только в `telegram_accounts`**  
-   Не дублировать Telegram ID в `users` (PII-изоляция, единая точка связи с Telegram).
+Не дублировать Telegram ID в `users` (PII-изоляция, единая точка связи с Telegram).
 
 2. **Минимальный `users`**  
-   UUID PK, `role`, timestamps — без `first_name` / `username` на уровне users; контактные поля живут в `telegram_accounts`.
+UUID PK, `role`, timestamps — без `first_name` / `username` на уровне users; контактные поля живут в `telegram_accounts`.
 
 3. **Согласованность с WF_01…03**  
-   Workflows описаны как: создать user → связать `telegram_accounts` → писать audit (отдельно).
+Workflows описаны как: создать user → связать `telegram_accounts` → писать audit (отдельно).
 
 4. **FK-дисциплина**  
-   `telegram_accounts.user_id NOT NULL REFERENCES users(id) ON DELETE CASCADE`, `telegram_id BIGINT NOT NULL UNIQUE`.
+`telegram_accounts.user_id NOT NULL REFERENCES users(id) ON DELETE CASCADE`, `telegram_id BIGINT NOT NULL UNIQUE`.
 
 5. **Масштабирование**  
-   Разделение identity (users) и канала (telegram_accounts) упрощает будущие аккаунты / мульти-канальность.
+Разделение identity (users) и канала (telegram_accounts) упрощает будущие аккаунты / мульти-канальность.
 
 Итог: файл `001_users_and_telegram_accounts_schema.sql` соответствует принятой архитектуре **source of truth = PostgreSQL + разделение PII**.
 
@@ -61,7 +61,7 @@
 | `telegram_accounts` | telegram_id без UNIQUE/NOT NULL | NOT NULL UNIQUE + FK NOT NULL |
 | `audit_events` | Создаётся здесь | **Отсутствует** в канон-001 |
 
-**Конфликт:** оба файла — префикс `001_` и оба делают `CREATE TABLE users` / `telegram_accounts` с **разной** структурой.
+**Конфликт:** оба файлы — префикс `001_` и оба делают `CREATE TABLE users` / `telegram_accounts` с **разной** структурой.
 
 Риски при «прогоне всего каталога»:
 
@@ -135,11 +135,11 @@ INDEX ON audit_events (user_id)
 INDEX ON audit_events (event_type, created_at)
 ```
 
-Рекомендуемое имя файла (предложение): `001b_audit_events_schema.sql` сразу после канон-001, **или** `008_audit_events_schema.sql` в конце цепочки, если инструмент миграций требует строго монотонных номеров без суффиксов.
+Рекомендуемое имя файла (предложение): `001b_audit_events_schema.sql` сразу после канон-001, **или** `008_audit_events_schema.sql` в конце [...]
 
 ### 5.3. Временный workaround (только dev, осознанно)
 
-Не рекомендуется для staging/prod. Если нужен быстрый smoke: вручную создать таблицу из §5.2 на dev после канон-001, затем оформить как миграцию.
+Не рекомендуется для staging/prod. Если нужен быстрый smoke: вручную создать таблицу из §5.2 на dev после канон-001, зате[...]
 
 ---
 
@@ -177,7 +177,7 @@ pg_dump -Fc -f backup_$(date +%Y%m%d_%H%M%S).dump "$DATABASE_URL"
 3. Зафиксировать ошибки CREATE/FK.  
 4. Проверить наличие таблиц: users, telegram_accounts, profiles, …, message_moderation_queue.  
 5. Опционально: минимальный SQL insert user + telegram_account (без n8n).  
-6. Уничтожить контейнер — схема не считается «боевой».
+6. Уничтожить контейнер — схема не считается «боевой".
 
 ### 7.3. CI (рекомендация на будущее)
 
@@ -192,7 +192,7 @@ Job: Postgres service → migrate canonical set → fail on error.
 |----------|------|
 | `docs/MIGRATION_AUDIT_REPORT.md` | Детальный аудит Copilot |
 | `docs/PROJECT_CONSISTENCY_REPORT.md` | Дубли и расхождения docs |
-| `docs/PROJECT_CONTEXT.md` | Общий контекст (после merge PR #1) |
+| `docs/PROJECT_CONTEXT.md` | Общий контекст (см. `docs/PROJECT_CONTEXT.md`) |
 | `database/migrations/README.md` | Краткое описание каталога |
 | `AI_CONTEXT.md` | Ожидания WF по таблицам |
 

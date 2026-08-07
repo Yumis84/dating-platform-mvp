@@ -4,28 +4,28 @@
 
 ## Этап 0 — Infrastructure
 - Статус: 🟩 Завершено
-- Комментарии: Подготовлена базовая инфраструктура для разработки (docker-compose, n8n, Postgres, pgAdmin, Adminer, WebApp nginx) и соответствующая документация.
+- Комментарии: Подготовлена базовая инфраструктура для разработки (docker-compose, n8n, Postgres, pgAdmin, Adminer, WebApp nginx) и соо... 
 
 ## Следующий этап
 - Этап 1 — Registration
-  - Описание: Реализация регистрации пользователей, первичных сущностей (профиль, связка с Telegram), валидация и поток регистрации.
+  - Описание: Реализация регистрации пользователей, первичных сущностей (профиль, связка с Telegram), валидация ...
 
 ## Прогресс по регистрации
 
 - users schema: ✅
 - telegram_accounts schema: ✅
-- audit_events schema: ✅
+- audit_events schema: MISSING — not created by canonical migrations (001–007); requires reconciliation migration (e.g. 008_reconcile_users_and_audit.sql)
 - WF_01 registration design: ✅
 - WF_02 role selection: ✅
 - WF_03 AI profile agent: ✅
 
 ## Этап 2 — AI Profile
 - Статус: 🟩 Workflow design completed
-- Комментарии: Дизайн WF_03_AI_PROFILE_AGENT готов. Миграция профилей подготовлена (002_profiles_schema.sql). Следующий шаг — реализация и тестирование в dev (импорт workflow, подготовка credentials, прогон миграции).
+- Комментарии: Дизайн WF_03_AI_PROFILE_AGENT готов. Миграция профилей подготовлена (002_profiles_schema.sql). Следующий шаг — реа...
 
 ## Этап 2.3 — Moderation
 - Статус: 🟩 Database design completed
-- Комментарии: Добавлены таблицы profile_moderation, moderation_rules, moderation_history и дизайн модерации оформлен в database/MODERATION_DESIGN.md.
+- Комментарии: Добавлены таблицы profile_moderation, moderation_rules, moderation_history и дизайн модерации оформлен в database/MODERATION_DESI...
 
 ## Этап 2.4 — AI Moderation
 - Статус: 🟩 AI Moderation workflow design completed
@@ -33,7 +33,7 @@
 
 ## Этап 3 — Catalog
 - Статус: 🟩 Catalog design completed
-- Комментарии: Добавлены миграция 004_catalog_schema.sql, CATALOG_DESIGN.md, and n8n workflows WF_05_PROFILE_CATALOG, WF_06_PROFILE_VIEW, WF_07_FAVORITES (design + JSON templates).
+- Комментарии: Добавлены миграция 004_catalog_schema.sql, CATALOG_DESIGN.md, and n8n workflows WF_05_PROFILE_CATALOG, WF_06_PROFILE_VIEW, WF_07_FAVORITES (design + JSON...)
 
 ## Этап 3.1 — Catalog completed
 - Статус: 🟩 Completed
@@ -54,3 +54,10 @@
 ## Этап 4.3 — AI message moderation
 - Статус: 🟩 AI chat moderation design completed
 - Комментарии: Added message_moderation_queue, WF_12 AI moderation workflow and documentation for moderation flows.
+
+Notes:
+- Canonical migrations 001..007 do NOT create the audit_events table. The legacy `001_initial_users_schema.sql` is a conflicting variant and is NOT canonical.
+- WF_01..WF_03 write to audit_events — these workflows require either:
+  - applying a reconciliation migration that creates and/or reconciles audit_events (recommended), or
+  - a temporary manual table creation on dev only (not recommended for staging/prod).
+See docs/MIGRATION_MANIFEST.md and database/MIGRATION_POLICY.md for canonical order and reconciliation guidance.
