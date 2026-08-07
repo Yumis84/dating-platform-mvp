@@ -4,7 +4,7 @@
 Статус: **канонический порядок миграций (документация)**  
 Источник аудита: `docs/MIGRATION_AUDIT_REPORT.md`, `docs/PROJECT_CONSISTENCY_REPORT.md`  
 
-> Этот файл **не изменяет** SQL. Он фиксирует, *какой* набор миграций считать рабочим и *как* безопасно разрешить конфликт `001_*`.
+> Этот файл **не изменяет** SQL. Он фиксирует, *какой* набор миграций считать рабочим и *как* безопасно разрешить [...]
 
 ---
 
@@ -119,6 +119,28 @@ Workflows описаны как: создать user → связать `telegra
 
 Если применять только канон-001 → **таблица audit_events отсутствует** → runtime error в registration/role/profile flows.
 
+### 5.2. Целевое решение (будущая миграция, не в этом PR)
+
+Создать **ровно один** раз:
+
+```text
+audit_events (
+  id UUID PK DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id),  -- предпочтительно ON DELETE SET NULL или CASCADE — согласовать
+  event_type TEXT NOT NULL,
+  event_data JSONB,
+  created_at TIMESTAMPTZ DEFAULT now()
+)
+INDEX ON audit_events (user_id)
+INDEX ON audit_events (event_type, created_at)
+```
+
+Рекомендуемое имя файла (предложение): `001b_audit_events_schema.sql` сразу после канон-001, **или** `008_audit_events_schema.sql` в конце [...]
+
+### 5.3. Временный workaround (только dev, осознанно)
+
+Не рекомендуется для staging/prod. Если нужен быстрый smoke: вручную создать таблицу из §5.2 на dev после канон-001, зате[...]
+
 ---
 
 ## 6. Проверки перед миграциями
@@ -139,7 +161,28 @@ Workflows описаны как: создать user → связать `telegra
 
 ## 7. Бэкап и dry-run
 
-(omitted remainder for brevity)
+### 7.1. Бэкап (непустая БД)
+
+```bash
+# Пример (подставить свои параметры)
+pg_dump -Fc -f backup_$(date +%Y%m%d_%H%M%S).dump "$DATABASE_URL"
+```
+
+Хранить dump вне контейнера (volume / object storage). Не коммитить dump в git.
+
+### 7.2. Dry-run на чистой БД
+
+1. Поднять disposable Postgres (docker).  
+2. Применить **только** канонический список §1 (+ будущий audit, когда появится).  
+3. Зафиксировать ошибки CREATE/FK.  
+4. Проверить наличие таблиц: users, telegram_accounts, profiles, …, message_moderation_queue.  
+5. Опционально: минимальный SQL insert user + telegram_account (без n8n).  
+6. Уничтожить контейнер — схема не считается «боевой".
+
+### 7.3. CI (рекомендация на будущее)
+
+Job: Postgres service → migrate canonical set → fail on error.  
+Не включать legacy 001 в CI path.
 
 ---
 
@@ -149,6 +192,18 @@ Workflows описаны как: создать user → связать `telegra
 |----------|------|
 | `docs/MIGRATION_AUDIT_REPORT.md` | Детальный аудит Copilot |
 | `docs/PROJECT_CONSISTENCY_REPORT.md` | Дубли и расхождения docs |
-| `docs/PROJECT_CONTEXT.md` | Общий контекст |
+| `docs/PROJECT_CONTEXT.md` | Общий контекст (см. `docs/PROJECT_CONTEXT.md`) |
 | `database/migrations/README.md` | Краткое описание каталога |
 | `AI_CONTEXT.md` | Ожидания WF по таблицам |
+
+---
+
+## 9. Итог
+
+| Вопрос | Ответ |
+|--------|--------|
+| Какой 001 применять? | **`001_users_and_telegram_accounts_schema.sql`** |
+| Что с initial? | **Legacy / не запускать**; вынести из path отдельным PR |
+| audit_events? | Нужна **отдельная** миграция после канон-001 |
+| Можно ли сейчас migrate prod? | **Нет** — BLOCKER до cleanup 001 + audit |
+| Этот PR меняет SQL? | **Нет** — только документация |
