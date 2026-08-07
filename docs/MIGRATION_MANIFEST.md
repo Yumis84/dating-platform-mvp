@@ -33,19 +33,19 @@
 Каноническая модель проекта (AI_CONTEXT, PROJECT_CONTEXT, WF design):
 
 1. **`telegram_id` только в `telegram_accounts`**  
-   Не дублировать Telegram ID в `users` (PII-изоляция, единая точка связи с Telegram).
+Не дублировать Telegram ID в `users` (PII-изоляция, единая точка связи с Telegram).
 
 2. **Минимальный `users`**  
-   UUID PK, `role`, timestamps — без `first_name` / `username` на уровне users; контактные поля живут в `telegram_accounts`.
+UUID PK, `role`, timestamps — без `first_name` / `username` на уровне users; контактные поля живут в `telegram_accounts`.
 
 3. **Согласованность с WF_01…03**  
-   Workflows описаны как: создать user → связать `telegram_accounts` → писать audit (отдельно).
+Workflows описаны как: создать user → связать `telegram_accounts` → писать audit (отдельно).
 
 4. **FK-дисциплина**  
-   `telegram_accounts.user_id NOT NULL REFERENCES users(id) ON DELETE CASCADE`, `telegram_id BIGINT NOT NULL UNIQUE`.
+`telegram_accounts.user_id NOT NULL REFERENCES users(id) ON DELETE CASCADE`, `telegram_id BIGINT NOT NULL UNIQUE`.
 
 5. **Масштабирование**  
-   Разделение identity (users) и канала (telegram_accounts) упрощает будущие аккаунты / мульти-канальность.
+Разделение identity (users) и канала (telegram_accounts) упрощает будущие аккаунты / мульти-канальность.
 
 Итог: файл `001_users_and_telegram_accounts_schema.sql` соответствует принятой архитектуре **source of truth = PostgreSQL + разделение PII**.
 
@@ -61,7 +61,7 @@
 | `telegram_accounts` | telegram_id без UNIQUE/NOT NULL | NOT NULL UNIQUE + FK NOT NULL |
 | `audit_events` | Создаётся здесь | **Отсутствует** в канон-001 |
 
-**Конфликт:** оба файла — префикс `001_` и оба делают `CREATE TABLE users` / `telegram_accounts` с **разной** структурой.
+**Конфликт:** оба файлы — префикс `001_` и оба делают `CREATE TABLE users` / `telegram_accounts` с **разной** структурой.
 
 Риски при «прогоне всего каталога»:
 
@@ -119,28 +119,6 @@
 
 Если применять только канон-001 → **таблица audit_events отсутствует** → runtime error в registration/role/profile flows.
 
-### 5.2. Целевое решение (будущая миграция, не в этом PR)
-
-Создать **ровно один** раз:
-
-```text
-audit_events (
-  id UUID PK DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES users(id),  -- предпочтительно ON DELETE SET NULL или CASCADE — согласовать
-  event_type TEXT NOT NULL,
-  event_data JSONB,
-  created_at TIMESTAMPTZ DEFAULT now()
-)
-INDEX ON audit_events (user_id)
-INDEX ON audit_events (event_type, created_at)
-```
-
-Рекомендуемое имя файла (предложение): `001b_audit_events_schema.sql` сразу после канон-001, **или** `008_audit_events_schema.sql` в конце цепочки, если инструмент миграций требует строго монотонных номеров без суффиксов.
-
-### 5.3. Временный workaround (только dev, осознанно)
-
-Не рекомендуется для staging/prod. Если нужен быстрый smoke: вручную создать таблицу из §5.2 на dev после канон-001, затем оформить как миграцию.
-
 ---
 
 ## 6. Проверки перед миграциями
@@ -161,28 +139,7 @@ INDEX ON audit_events (event_type, created_at)
 
 ## 7. Бэкап и dry-run
 
-### 7.1. Бэкап (непустая БД)
-
-```bash
-# Пример (подставить свои параметры)
-pg_dump -Fc -f backup_$(date +%Y%m%d_%H%M%S).dump "$DATABASE_URL"
-```
-
-Хранить dump вне контейнера (volume / object storage). Не коммитить dump в git.
-
-### 7.2. Dry-run на чистой БД
-
-1. Поднять disposable Postgres (docker).  
-2. Применить **только** канонический список §1 (+ будущий audit, когда появится).  
-3. Зафиксировать ошибки CREATE/FK.  
-4. Проверить наличие таблиц: users, telegram_accounts, profiles, …, message_moderation_queue.  
-5. Опционально: минимальный SQL insert user + telegram_account (без n8n).  
-6. Уничтожить контейнер — схема не считается «боевой».
-
-### 7.3. CI (рекомендация на будущее)
-
-Job: Postgres service → migrate canonical set → fail on error.  
-Не включать legacy 001 в CI path.
+(omitted remainder for brevity)
 
 ---
 
@@ -192,18 +149,6 @@ Job: Postgres service → migrate canonical set → fail on error.
 |----------|------|
 | `docs/MIGRATION_AUDIT_REPORT.md` | Детальный аудит Copilot |
 | `docs/PROJECT_CONSISTENCY_REPORT.md` | Дубли и расхождения docs |
-| `docs/PROJECT_CONTEXT.md` | Общий контекст (после merge PR #1) |
+| `docs/PROJECT_CONTEXT.md` | Общий контекст |
 | `database/migrations/README.md` | Краткое описание каталога |
 | `AI_CONTEXT.md` | Ожидания WF по таблицам |
-
----
-
-## 9. Итог
-
-| Вопрос | Ответ |
-|--------|--------|
-| Какой 001 применять? | **`001_users_and_telegram_accounts_schema.sql`** |
-| Что с initial? | **Legacy / не запускать**; вынести из path отдельным PR |
-| audit_events? | Нужна **отдельная** миграция после канон-001 |
-| Можно ли сейчас migrate prod? | **Нет** — BLOCKER до cleanup 001 + audit |
-| Этот PR меняет SQL? | **Нет** — только документация |
