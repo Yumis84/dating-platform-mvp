@@ -2,7 +2,7 @@
 
 Date: 2026-08-11
 
-Status: **STATIC + SERVER DRAFT PASS. Imported only as a separate inactive DEV workflow. Not approved for execution, activation, or production publish.**
+Status: **STATIC + SERVER DRAFT + SAFE SMOKE PASS. Imported only as a separate inactive DEV workflow. Not approved for activation or production publish.**
 
 ## Artifact
 
@@ -116,19 +116,26 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Draft import target: `eMMEhEMrqFe35F7l` (`WF_01_USER_REGISTRATION_DEV_CORRECTED_56NODE`)
 - Imported draft graph: 56 nodes, 56 edges, 56 unique names/IDs, no missing endpoints/references
 - Imported draft state: `active = false`, `activeVersionId = null`, `triggerCount = 0`
+- Safe pin-data smoke tests: 22/22 PASS (executions `4426`-`4447`)
+- All canonical text-onboarding steps `0..9`: PASS, including validation, optional skip, stale-answer protection, and step-9 finalization routing
+- Role, `/start`, unknown callback, photo, missing-user/session, and unsupported-message routes: PASS
+- Every Telegram, PostgreSQL, and other external node was pinned in these smoke tests; no Telegram API call or database mutation was made
+- Test-database SQL schema parsing: 18/18 PASS via `PREPARE` + `DEALLOCATE`, execution `4453`
+- SQL-check workflow: `JW6qb1wq00gqlCxN` (`WF_01_DEV_SQL_SCHEMA_CHECK`), 2 nodes, `active = false`, `activeVersionId = null`
+- SQL-check statement counts: 18 `PREPARE`, 18 `DEALLOCATE`, 0 `EXECUTE`; PostgreSQL node error: none
 - Existing `WF_01_USER_REGISTRATION_0001` and `WF_01_USER_REGISTRATION copy` were not overwritten
 
 ## Remaining boundaries
 
 - This is still a canvas snapshot (`nodes/connections/pinData/meta`), not a full workflow export with workflow ID, active state, settings, and draft/active version IDs.
-- SQL was statically inspected but was not executed against the live database.
+- All 18 SQL statements were parsed and type-checked by the confirmed test PostgreSQL database through `PREPARE`; no prepared statement was executed, so no `INSERT`, `UPDATE`, or `DELETE` took effect.
 - Advisory locks protect executions using this corrected workflow. Absolute cross-system guarantees still require future additive unique indexes after a duplicate-data audit; no migration was created or applied here.
 - Existing duplicate profiles/sessions/photos, if already present, are not deleted or reconciled.
 - The workflow queues `profile_moderation`; it does not call WF_04 directly. A separate worker/webhook contract is still required if no moderation worker polls this table.
 - No photo-count policy was added because no product limit was confirmed.
-- The corrected JSON was compiled through the n8n Workflow SDK and imported as a separate inactive DEV workflow. It was not executed, activated, or published.
+- The corrected JSON was compiled through the n8n Workflow SDK and imported as a separate inactive DEV workflow. It was exercised only with pinned external nodes, and it was not activated or published.
 
 ## Safe next step
 
-Confirm the two credential bindings and node parameters in the server UI. Before any execution, verify that the Postgres credential points to a non-production test database; only then run branch smoke tests with test Telegram data. Production publish still requires a separate explicit approval.
+Run a deliberately isolated end-to-end test with a dedicated Telegram test account against the confirmed test database, then inspect the created rows and moderation state. Production publish still requires a separate explicit approval.
 
