@@ -1,0 +1,845 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        -1472
+      ],
+      "id": "fd3b3119-bd87-4e83-85b3-d8f89dff02c0",
+      "webhookId": "4fd1f4f1-3fa3-4696-b688-9f097ca50b23",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.id : $json.update.message.from.id}}"
+            },
+            {
+              "name": "username",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.username : $json.update.message.from.username}}"
+            },
+            {
+              "name": "first_name",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.first_name : $json.update.message.from.first_name}}"
+            },
+            {
+              "name": "last_name",
+              "value": "={{$json[\"message\"] && $json[\"message\"].from ? $json.message.from.last_name : $json.update.message.from.last_name}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract User Info",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -1280
+      ],
+      "id": "64e82199-9279-4a26-8eee-e3516c1ca02d"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (SELECT COUNT(*) FROM telegram_accounts WHERE telegram_id = {{$('Extract User Info').item.json.telegram_id}}) > 0 AS user_exists,\n  (SELECT user_id::text FROM telegram_accounts WHERE telegram_id = {{$('Extract User Info').item.json.telegram_id}} LIMIT 1) AS user_id;",
+        "additionalFields": {}
+      },
+      "name": "Check user exists",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        656,
+        -1280
+      ],
+      "id": "ed2f5324-5491-4298-82fb-c93ed51115e5",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.user_exists === true}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "name": "User exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        880,
+        -1280
+      ],
+      "id": "466b9f20-084a-4de0-adaa-aab7a94f7d35"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE telegram_accounts\nSET username = '{{$('Extract User Info').item.json.username || \"\"}}'\nWHERE telegram_id = {{$('Extract User Info').item.json.telegram_id}}\nRETURNING user_id;",
+        "additionalFields": {}
+      },
+      "name": "Update telegram_account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        -1376
+      ],
+      "id": "706c73c1-3d87-44bc-a9b3-c77b77353345",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH existing AS (\n  SELECT user_id FROM telegram_accounts WHERE telegram_id = {{$('Extract User Info').item.json.telegram_id}}\n),\nnew_user AS (\n  INSERT INTO users (role)\n  SELECT 'man'\n  WHERE NOT EXISTS (SELECT 1 FROM existing)\n  RETURNING id\n)\nSELECT\n  COALESCE(\n    (SELECT user_id FROM existing),\n    (SELECT id FROM new_user)\n  ) AS user_id;",
+        "additionalFields": {}
+      },
+      "name": "Create user",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        -1184
+      ],
+      "id": "62e0aa6c-e577-46d1-999d-45100db49086",
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO telegram_accounts\n(user_id, telegram_id, username)\nVALUES (\n  '{{$json.user_id}}',\n  {{$('Extract User Info').item.json.telegram_id}},\n  '{{$('Extract User Info').item.json.username || \"\"}}'\n)\nON CONFLICT (telegram_id) DO NOTHING\nRETURNING user_id;",
+        "additionalFields": {}
+      },
+      "name": "Create telegram_account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        -1184
+      ],
+      "id": "37859045-cc60-4539-a452-9ea8cba567e7",
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_events\n(user_id, event_type, event_data)\nVALUES (\n  '{{$('Create user').item.json.user_id}}',\n  'registration',\n  jsonb_build_object(\n    'telegram_id', {{$('Extract User Info').item.json.telegram_id}},\n    'username', '{{$('Extract User Info').item.json.username || \"\"}}',\n    'first_name', '{{$('Extract User Info').item.json.first_name || \"\"}}',\n    'last_name', '{{$('Extract User Info').item.json.last_name || \"\"}}'\n  )\n);",
+        "additionalFields": {}
+      },
+      "name": "Create audit_event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        -1184
+      ],
+      "id": "4d788a49-b97f-4438-a934-aa341141f4be",
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract User Info').item.json.telegram_id}}",
+        "text": "Добро пожаловать.\nВыберите роль.",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Мужчина",
+                    "additionalFields": {
+                      "callback_data": "role:man"
+                    }
+                  },
+                  {
+                    "text": "Девушка",
+                    "additionalFields": {
+                      "callback_data": "role:woman"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "name": "Send welcome",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        -1280
+      ],
+      "id": "644223a0-cca8-4b91-92d4-6fcd89f4d3cf",
+      "webhookId": "f63ab44c-cf18-4113-809d-865401d6c298",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.callback_query !== undefined}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "name": "Is callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        208,
+        -1472
+      ],
+      "id": "4a24d3a8-af71-4a5f-8e9f-52d5f6e26971"
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "={{$json.callback_query.from.id}}"
+            },
+            {
+              "name": "callback_query_id",
+              "value": "={{$json.callback_query.id}}"
+            },
+            {
+              "name": "chat_id",
+              "value": "={{$json.callback_query.message.chat.id}}"
+            },
+            {
+              "name": "callback_data",
+              "value": "={{$json.callback_query.data}}"
+            },
+            {
+              "name": "role",
+              "value": "={{$json.callback_query.data === 'role:man' ? 'man' : 'woman'}}"
+            },
+            {
+              "name": "confirmation_text",
+              "value": "={{$json.callback_query.data === 'role:man' ? 'Роль сохранена: Мужчина.' : 'Роль сохранена: Девушка.'}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract role vars",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -1664
+      ],
+      "id": "6cb26e65-6ad6-49da-8482-7092f40bb634"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  current_database() AS db,\n  current_schema() AS schema,\n  COUNT(*) AS telegram_accounts_count\nFROM telegram_accounts;",
+        "additionalFields": {}
+      },
+      "name": "Resolve user",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        640,
+        -1664
+      ],
+      "id": "8462c4d8-2a12-4663-a626-9f8703dbb851",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.user_id !== null && $json.user_id !== undefined}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "name": "User found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        880,
+        -1664
+      ],
+      "id": "05190b77-8e4c-43af-82aa-6a8392bff22e"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users\nSET role = '{{$('Extract role vars').item.json.role}}',\n    updated_at = now()\nWHERE id = '{{$json.user_id}}'\nRETURNING id;",
+        "additionalFields": {}
+      },
+      "name": "Update role",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        -1568
+      ],
+      "id": "2ff62aa0-5244-4d14-8763-637eb6758dc8",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{$('Extract role vars').item.json.callback_query_id}}",
+        "additionalFields": {}
+      },
+      "name": "answerCallbackQuery",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        -1568
+      ],
+      "id": "b3ca3138-4920-437c-b7ba-9458cf850914",
+      "webhookId": "34159010-4f25-4619-93da-81629d08131a",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract role vars').item.json.chat_id}}",
+        "text": "={{$('Extract role vars').item.json.confirmation_text}}",
+        "additionalFields": {}
+      },
+      "name": "Send role confirm",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        -1568
+      ],
+      "id": "b84b94dd-ed7d-4bfa-8f05-8ec5eb7a1bc4",
+      "webhookId": "c596eac7-4c5b-4a04-8ea4-b6c982a67190",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_events\n(user_id, event_type, event_data)\nVALUES (\n  '{{$('Resolve user').item.json.user_id}}',\n  'role_selected',\n  jsonb_build_object(\n    'role', '{{$('Extract role vars').item.json.role}}',\n    'telegram_id', {{$('Extract role vars').item.json.telegram_id}},\n    'callback_query_id', '{{$('Extract role vars').item.json.callback_query_id}}'\n  )\n)\nRETURNING id;",
+        "additionalFields": {}
+      },
+      "name": "Insert role audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        -1568
+      ],
+      "id": "a70265af-bef6-4db7-961b-7150305955fe",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{$('Extract role vars').item.json.callback_query_id}}",
+        "additionalFields": {
+          "text": "Сначала нажмите /start"
+        }
+      },
+      "name": "answerCallbackQuery (not found)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        -1760
+      ],
+      "id": "8c981c14-a901-424a-9cc2-ffd84167f3de",
+      "webhookId": "ad719e15-58c1-4721-8559-034906c7794a",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract role vars').item.json.chat_id}}",
+        "text": "Сначала нажмите /start",
+        "additionalFields": {}
+      },
+      "name": "Send start prompt",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        -1760
+      ],
+      "id": "cd7ccc75-5265-4095-b185-d85e46150785",
+      "webhookId": "4412758c-ff75-4d69-b547-b8485caffcdd",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH existing AS (\n  SELECT\n    id,\n    user_id,\n    profile_id,\n    current_step,\n    COALESCE(ai_context, '{}'::jsonb) AS ai_context,\n    status\n  FROM profile_ai_sessions\n  WHERE user_id = '{{$(\"Resolve user\").item.json.user_id}}'\n    AND status = 'IN_PROGRESS'\n  ORDER BY created_at DESC\n  LIMIT 1\n), inserted AS (\n  INSERT INTO profile_ai_sessions (\n    user_id,\n    profile_id,\n    current_step,\n    ai_context,\n    status,\n    created_at,\n    updated_at\n  )\n  SELECT\n    '{{$(\"Resolve user\").item.json.user_id}}',\n    NULL,\n    0,\n    '{}'::jsonb,\n    'IN_PROGRESS',\n    now(),\n    now()\n  WHERE NOT EXISTS (SELECT 1 FROM existing)\n  RETURNING\n    id,\n    user_id,\n    profile_id,\n    current_step,\n    COALESCE(ai_context, '{}'::jsonb) AS ai_context,\n    status\n)\nSELECT * FROM existing\nUNION ALL\nSELECT * FROM inserted\nLIMIT 1;",
+        "additionalFields": {}
+      },
+      "id": "32a5c6cf-cf66-4a5d-a2e7-c36eb0d6d324",
+      "name": "Ensure profile session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        -1568
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "session_id",
+              "value": "={{$json.id}}"
+            },
+            {
+              "name": "current_step",
+              "value": "={{$json.current_step}}"
+            },
+            {
+              "name": "question_text",
+              "value": "={{['Как тебя зовут?','Сколько тебе лет?','В каком городе живёшь?','Расскажи немного о себе.','Какие у тебя интересы?','Какова цель знакомства?','Расскажи о своих хобби. Можно пропустить.','Чем ты занимаешься / где работаешь? Можно пропустить.','Какое у тебя образование? Можно пропустить.','Какой стиль общения тебе ближе? Можно пропустить.'][$json.current_step] || 'Анкета уже заполнена.'}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e349c9b1-14d0-4fb8-b0fa-157251fc99a5",
+      "name": "Prepare onboarding question",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        2224,
+        -1568
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$(\"Extract role vars\").item.json.chat_id}}",
+        "text": "={{$(\"Prepare onboarding question\").item.json.question_text}}",
+        "additionalFields": {}
+      },
+      "id": "473c4afe-15a7-4a31-b856-f853d2dcaa30",
+      "name": "Send onboarding question",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        2448,
+        -1568
+      ],
+      "webhookId": "d46e0d2f-95c0-4424-91fd-097741429a83",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "7558747925"
+            },
+            {
+              "name": "callback_query_id",
+              "value": "test-stage1"
+            },
+            {
+              "name": "chat_id",
+              "value": "7558747925"
+            },
+            {
+              "name": "callback_data",
+              "value": "role:woman"
+            },
+            {
+              "name": "role",
+              "value": "woman"
+            },
+            {
+              "name": "confirmation_text",
+              "value": "TEST"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Extract role vars1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        432,
+        -1856
+      ],
+      "id": "7fbd6367-1b5c-4b58-963b-41bb1e43ad9e"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Is callback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract User Info": {
+      "main": [
+        [
+          {
+            "node": "Check user exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check user exists": {
+      "main": [
+        [
+          {
+            "node": "User exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User exists?": {
+      "main": [
+        [
+          {
+            "node": "Update telegram_account",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update telegram_account": {
+      "main": [
+        [
+          {
+            "node": "Send welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create user": {
+      "main": [
+        [
+          {
+            "node": "Create telegram_account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create telegram_account": {
+      "main": [
+        [
+          {
+            "node": "Create audit_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create audit_event": {
+      "main": [
+        [
+          {
+            "node": "Send welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is callback?": {
+      "main": [
+        [
+          {
+            "node": "Extract role vars1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract User Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract role vars": {
+      "main": [
+        []
+      ]
+    },
+    "Resolve user": {
+      "main": [
+        [
+          {
+            "node": "User found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User found?": {
+      "main": [
+        [
+          {
+            "node": "Update role",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "answerCallbackQuery (not found)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update role": {
+      "main": [
+        [
+          {
+            "node": "Send role confirm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "answerCallbackQuery": {
+      "main": [
+        [
+          {
+            "node": "Ensure profile session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send role confirm": {
+      "main": [
+        [
+          {
+            "node": "Insert role audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert role audit": {
+      "main": [
+        [
+          {
+            "node": "answerCallbackQuery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "answerCallbackQuery (not found)": {
+      "main": [
+        [
+          {
+            "node": "Send start prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure profile session": {
+      "main": [
+        [
+          {
+            "node": "Prepare onboarding question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare onboarding question": {
+      "main": [
+        [
+          {
+            "node": "Send onboarding question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract role vars1": {
+      "main": [
+        [
+          {
+            "node": "Resolve user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "instanceId": "7715b9e43263936ef7d5ead15b70c021d76e29a9bc1abb07d28243b86cc28821"
+  }
+}
