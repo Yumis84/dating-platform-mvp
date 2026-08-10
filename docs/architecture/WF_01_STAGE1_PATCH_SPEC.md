@@ -2,7 +2,7 @@
 
 Дата: 2026-08-10
 
-Статус: planned draft-only change. Production publish запрещён без отдельного подтверждения пользователя.
+Статус: draft изменён и проверен; production publish запрещён без отдельного подтверждения пользователя.
 
 ## Base snapshot
 
@@ -182,6 +182,41 @@ Draft: 22 nodes после `update_workflow`.
 5. Проверить, что все 19 старых node IDs/parameters сохранены.
 6. Проверить новые nodes и connections.
 7. Проверить, что `publish_workflow` НЕ вызывался.
+
+## Verified draft state after Stage 1 update
+
+Read-only verification after `update_workflow` confirmed:
+
+- Draft nodes: `22`
+- Active nodes: `19`
+- New draft version ID: `ebbbc76d-281e-4189-94f5-ee1ab9feb0d1`
+- Active version ID unchanged: `d2678798-5807-4813-8e24-7a819285b298`
+- All 19 original nodes preserved with matching node IDs
+- Added nodes present: `Ensure profile session`, `Prepare onboarding question`, `Send onboarding question`
+- Added connections present and correct
+- Existing registration/callback/role connections preserved
+- `publish_workflow` was not called
+
+## Credential blocker before publish
+
+The draft update auto-assigned credentials to new nodes because credential identifiers are redacted from `get_workflow_details` output.
+
+Observed assignments:
+
+- `Ensure profile session` -> `Postgres account`
+- `Send onboarding question` -> `Telegram account`
+
+`Send onboarding question` MUST use the same Telegram credential as the existing production node `Send role confirm` (the project bot, expected to be one of the credentials named `@vstrechi18bot`). The auto-assigned generic `Telegram account` is not accepted for publish.
+
+Before any publish:
+
+1. Determine the exact credential ID used by existing `Send role confirm` using a read-only source if possible.
+2. Rebind ONLY `Send onboarding question` to that exact credential in draft.
+3. Verify the Postgres credential for `Ensure profile session` matches the existing production Postgres credential used by WF_01 nodes.
+4. Re-run `get_workflow_details` and validation.
+5. Keep Active unchanged until explicit user approval.
+
+If the MCP/API cannot expose existing credential IDs read-only, the user must inspect the credential selection in the n8n UI. Do not guess between multiple similarly named credentials.
 
 ## Test cases after eventual publish
 
