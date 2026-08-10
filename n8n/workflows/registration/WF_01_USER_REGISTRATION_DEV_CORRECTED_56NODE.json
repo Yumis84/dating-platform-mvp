@@ -211,7 +211,9 @@
       "parameters": {
         "chatId": "={{$('Extract role vars').item.json.chat_id}}",
         "text": "={{$('Extract role vars').item.json.confirmation_text}}",
-        "additionalFields": {}
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
       },
       "id": "d266a329-d27a-4261-9e6b-c4a4b6368029",
       "name": "Send role confirm",
@@ -232,7 +234,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO audit_events (user_id, event_type, event_data)\nVALUES (\n  '{{$(\"Resolve user\").item.json.user_id}}'::uuid,\n  'role_selected',\n  jsonb_build_object('role', '{{$(\"Extract role vars\").item.json.role}}')\n)\nRETURNING id, user_id::text AS user_id;",
+        "query": "=INSERT INTO audit_events (user_id, event_type, event_data)\nVALUES (\n  '{{$(\"Resolve user\").item.json.user_id}}'::uuid,\n  'role_selected',\n  jsonb_build_object('role', '{{$(\"Extract role vars\").item.json.role}}')\n)\nRETURNING id, user_id::text AS user_id;",
         "additionalFields": {}
       },
       "id": "bc7d0949-cd34-41d5-9c7b-02d8b00cdfa4",
@@ -310,7 +312,9 @@
       "parameters": {
         "chatId": "={{$(\"Extract role vars\").item.json.chat_id}}",
         "text": "={{$(\"Prepare onboarding question\").item.json.question_text}}",
-        "additionalFields": {}
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
       },
       "id": "6ea447f2-71ee-4347-a780-3ac38ad2ee1c",
       "name": "Send onboarding question",
@@ -357,7 +361,9 @@
       "parameters": {
         "chatId": "={{$('Extract role vars').item.json.chat_id}}",
         "text": "Сначала нажмите /start",
-        "additionalFields": {}
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
       },
       "id": "9aa6dbae-1bda-44f6-bdb0-3fa4a2233f29",
       "name": "Send start prompt",
@@ -457,7 +463,107 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH input AS (\n  SELECT $1::bigint AS telegram_id, $2::text AS file_id\n),\nta AS (\n  SELECT a.user_id\n  FROM telegram_accounts a\n  JOIN input ON input.telegram_id = a.telegram_id\n  LIMIT 1\n),\nlocked AS (\n  SELECT pg_advisory_xact_lock(hashtext(ta.user_id::text))\n  FROM ta\n),\nprof AS (\n  SELECT p.id, p.user_id\n  FROM profiles p\n  CROSS JOIN locked\n  WHERE p.user_id = (SELECT user_id FROM ta)\n  ORDER BY p.created_at, p.id\n  LIMIT 1\n),\nsession AS (\n  SELECT s.id\n  FROM profile_ai_sessions s\n  CROSS JOIN locked\n  WHERE s.user_id = (SELECT user_id FROM ta)\n    AND s.status = 'IN_PROGRESS'\n  ORDER BY s.created_at DESC, s.id\n  LIMIT 1\n),\nins_photo AS (\n  INSERT INTO profile_photos (profile_id, telegram_file_id, position)\n  SELECT\n    prof.id,\n    input.file_id,\n    COALESCE((SELECT MAX(pp.position) FROM profile_photos pp WHERE pp.profile_id = prof.id), -1) + 1\n  FROM prof\n  CROSS JOIN input\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM profile_photos pp\n    WHERE pp.profile_id = prof.id\n      AND pp.telegram_file_id = input.file_id\n  )\n  RETURNING id, profile_id\n),\nrequeue_profile AS (\n  UPDATE profiles p\n  SET status = 'PENDING_MODERATION',\n      updated_at = now()\n  WHERE p.id = (SELECT profile_id FROM ins_photo)\n  RETURNING p.id\n),\nphoto_audit AS (\n  INSERT INTO audit_events (user_id, event_type, event_data)\n  SELECT\n    ta.user_id,\n    'profile_photo_added',\n    jsonb_build_object('profile_id', ins_photo.profile_id)\n  FROM ta\n  CROSS JOIN ins_photo\n  RETURNING id\n),\nmoderation AS (\n  INSERT INTO profile_moderation (profile_id, moderator_type, status)\n  SELECT ins_photo.profile_id, 'AI', 'PENDING'\n  FROM ins_photo\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM profile_moderation pm\n    WHERE pm.profile_id = ins_photo.profile_id\n      AND pm.status = 'PENDING'\n  )\n  RETURNING id\n),\nupd_session AS (\n  UPDATE profile_ai_sessions s\n  SET ai_context = jsonb_set(\n        COALESCE(s.ai_context, '{}'::jsonb),\n        '{pending_photos}',\n        (\n          CASE\n            WHEN jsonb_typeof(s.ai_context->'pending_photos') = 'array'\n              THEN s.ai_context->'pending_photos'\n            ELSE '[]'::jsonb\n          END\n        ) || jsonb_build_array(\n          jsonb_build_object(\n            'telegram_file_id', input.file_id,\n            'position', CASE\n              WHEN jsonb_typeof(s.ai_context->'pending_photos') = 'array'\n                THEN jsonb_array_length(s.ai_context->'pending_photos')\n              ELSE 0\n            END\n          )\n        ),\n        true\n      ),\n      updated_at = now()\n  FROM input\n  WHERE s.id = (SELECT id FROM session)\n    AND NOT EXISTS (SELECT 1 FROM prof)\n    AND NOT EXISTS (\n      SELECT 1\n      FROM jsonb_array_elements(\n        CASE\n          WHEN jsonb_typeof(s.ai_context->'pending_photos') = 'array'\n            THEN s.ai_context->'pending_photos'\n          ELSE '[]'::jsonb\n        END\n      ) elem\n      WHERE elem->>'telegram_file_id' = input.file_id\n    )\n  RETURNING s.id\n)\nSELECT\n  EXISTS (SELECT 1 FROM prof) OR EXISTS (SELECT 1 FROM session) AS handled,\n  (SELECT id::text FROM prof) AS profile_id,\n  (SELECT count(*) FROM ins_photo) AS photo_inserted,\n  (SELECT count(*) FROM upd_session) AS …8483 tokens truncated…sion",
+        "query": "WITH input AS (\n  SELECT $1::bigint AS telegram_id, $2::text AS file_id\n),\nta AS (\n  SELECT a.user_id\n  FROM telegram_accounts a\n  JOIN input ON input.telegram_id = a.telegram_id\n  LIMIT 1\n),\nlocked AS (\n  SELECT pg_advisory_xact_lock(hashtext(ta.user_id::text))\n  FROM ta\n),\nprof AS (\n  SELECT p.id, p.user_id\n  FROM profiles p\n  CROSS JOIN locked\n  WHERE p.user_id = (SELECT user_id FROM ta)\n  ORDER BY p.created_at, p.id\n  LIMIT 1\n),\nsession AS (\n  SELECT s.id\n  FROM profile_ai_sessions s\n  CROSS JOIN locked\n  WHERE s.user_id = (SELECT user_id FROM ta)\n    AND s.status = 'IN_PROGRESS'\n  ORDER BY s.created_at DESC, s.id\n  LIMIT 1\n),\nins_photo AS (\n  INSERT INTO profile_photos (profile_id, telegram_file_id, position)\n  SELECT\n    prof.id,\n    input.file_id,\n    COALESCE((SELECT MAX(pp.position) FROM profile_photos pp WHERE pp.profile_id = prof.id), -1) + 1\n  FROM prof\n  CROSS JOIN input\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM profile_photos pp\n    WHERE pp.profile_id = prof.id\n      AND pp.telegram_file_id = input.file_id\n  )\n  RETURNING id, profile_id\n),\nrequeue_profile AS (\n  UPDATE profiles p\n  SET status = 'PENDING_MODERATION',\n      updated_at = now()\n  WHERE p.id = (SELECT profile_id FROM ins_photo)\n  RETURNING p.id\n),\nphoto_audit AS (\n  INSERT INTO audit_events (user_id, event_type, event_data)\n  SELECT\n    ta.user_id,\n    'profile_photo_added',\n    jsonb_build_object('profile_id', ins_photo.profile_id)\n  FROM ta\n  CROSS JOIN ins_photo\n  RETURNING id\n),\nmoderation AS (\n  INSERT INTO profile_moderation (profile_id, moderator_type, status)\n  SELECT ins_photo.profile_id, 'AI', 'PENDING'\n  FROM ins_photo\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM profile_moderation pm\n    WHERE pm.profile_id = ins_photo.profile_id\n      AND pm.status = 'PENDING'\n  )\n  RETURNING id\n),\nupd_session AS (\n  UPDATE profile_ai_sessions s\n  SET ai_context = jsonb_set(\n        COALESCE(s.ai_context, '{}'::jsonb),\n        '{pending_photos}',\n        (\n          CASE\n            WHEN jsonb_typeof(s.ai_context->'pending_photos') = 'array'\n              THEN s.ai_context->'pending_photos'\n            ELSE '[]'::jsonb\n          END\n        ) || jsonb_build_array(\n          jsonb_build_object(\n            'telegram_file_id', input.file_id,\n            'position', CASE\n              WHEN jsonb_typeof(s.ai_context->'pending_photos') = 'array'\n                THEN jsonb_array_length(s.ai_context->'pending_photos')\n              ELSE 0\n            END\n          )\n        ),\n        true\n      ),\n      updated_at = now()\n  FROM input\n  WHERE s.id = (SELECT id FROM session)\n    AND NOT EXISTS (SELECT 1 FROM prof)\n    AND NOT EXISTS (\n      SELECT 1\n      FROM jsonb_array_elements(\n        CASE\n          WHEN jsonb_typeof(s.ai_context->'pending_photos') = 'array'\n            THEN s.ai_context->'pending_photos'\n          ELSE '[]'::jsonb\n        END\n      ) elem\n      WHERE elem->>'telegram_file_id' = input.file_id\n    )\n  RETURNING s.id\n)\nSELECT\n  EXISTS (SELECT 1 FROM prof) OR EXISTS (SELECT 1 FROM session) AS handled,\n  (SELECT id::text FROM prof) AS profile_id,\n  (SELECT count(*) FROM ins_photo) AS photo_inserted,\n  (SELECT count(*) FROM upd_session) AS session_updated,\n  (SELECT count(*) FROM requeue_profile) AS profile_requeued,\n  (SELECT count(*) FROM moderation) AS moderation_created,\n  (SELECT count(*) FROM photo_audit) AS audit_created;",
+        "additionalFields": {
+          "queryParams": "telegram_id,file_id"
+        }
+      },
+      "id": "4ddac8b0-1547-4c11-bc44-e4e77f55c0cf",
+      "name": "Save photo metadata",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        848,
+        592
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.handled === true}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "942c4c65-85c4-452b-9f41-35c6809ed151",
+      "name": "Photo saved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract photo vars').item.json.chat_id}}",
+        "text": "Фото получено. Для существующей анкеты оно будет доступно после повторной модерации.",
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
+      },
+      "id": "e5d16aca-accd-4256-803b-0cf00bc37eac",
+      "name": "Send photo confirm",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        496
+      ],
+      "webhookId": "9b03d098-fc97-4ff0-8dc9-b1cefb656ed5",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId"…6573 tokens truncated…URNING id\n),\nmoderation AS (\n  INSERT INTO profile_moderation (profile_id, moderator_type, status)\n  SELECT completed.profile_id, 'AI', 'PENDING'\n  FROM completed\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM profile_moderation pm\n    WHERE pm.profile_id = completed.profile_id\n      AND pm.status = 'PENDING'\n  )\n  RETURNING id\n)\nSELECT\n  completed.id::text AS session_id,\n  completed.profile_id::text AS profile_id,\n  (SELECT count(*) FROM materialized_photos) AS photos_materialized,\n  EXISTS (SELECT 1 FROM profile_audit) OR EXISTS (\n    SELECT 1 FROM audit_events ae\n    WHERE ae.event_type = 'profile_created'\n      AND ae.event_data->>'profile_id' = completed.profile_id::text\n  ) AS audit_ready,\n  EXISTS (SELECT 1 FROM moderation) OR EXISTS (\n    SELECT 1 FROM profile_moderation pm\n    WHERE pm.profile_id = completed.profile_id\n      AND pm.status = 'PENDING'\n  ) AS moderation_ready\nFROM completed;",
+        "additionalFields": {
+          "queryParams": "id"
+        }
+      },
+      "id": "73c6b3f1-9ff0-4a46-84b4-97a5e047d7e7",
+      "name": "Finalize profile",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        2864,
+        1024
+      ],
+      "alwaysOutputData": false,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT s.id::text AS session_id, s.profile_id::text AS profile_id\nFROM profile_ai_sessions s\nWHERE s.id = $1::uuid\n  AND s.profile_id = $2::uuid\n  AND s.status = 'COMPLETED'\nLIMIT 1;",
+        "additionalFields": {
+          "queryParams": "session_id,profile_id"
+        }
+      },
+      "id": "907dc167-8a18-4d1e-bc29-f174e0fac57b",
+      "name": "Verify completed session",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 1,
       "position": [
@@ -524,7 +630,9 @@
       "parameters": {
         "chatId": "={{$('Validate answer').item.json.chat_id}}",
         "text": "Спасибо! Твоя анкета заполнена и отправлена на модерацию.",
-        "additionalFields": {}
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
       },
       "id": "f3ef14b3-97b1-4976-b280-fd6cebad1f87",
       "name": "Send finalize message",
@@ -573,7 +681,9 @@
       "parameters": {
         "chatId": "={{$('Validate answer').item.json.chat_id}}",
         "text": "={{$(\"Prepare next question\").item.json.question_text}}",
-        "additionalFields": {}
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
       },
       "id": "42925ac7-a9f3-4c01-ab73-4fe2fa47db61",
       "name": "Send next question",
@@ -595,7 +705,9 @@
       "parameters": {
         "chatId": "={{$('Extract message vars').item.json.chat_id}}",
         "text": "={{$('Validate answer').item.json.error_message}}",
-        "additionalFields": {}
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
       },
       "id": "91864a49-4274-4d47-b2d8-f32810290a64",
       "name": "Send validation error",
@@ -617,7 +729,9 @@
       "parameters": {
         "chatId": "={{$('Extract message vars').item.json.chat_id}}",
         "text": "Сейчас нет активной анкеты. Нажмите /start, чтобы начать.",
-        "additionalFields": {}
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
       },
       "id": "37cb8e83-7297-4fe7-bb67-a185e48efe78",
       "name": "Send fallback (no session)",
@@ -639,7 +753,9 @@
       "parameters": {
         "chatId": "={{$('Extract message vars').item.json.chat_id}}",
         "text": "Чтобы начать, нажмите /start",
-        "additionalFields": {}
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
       },
       "id": "535b3e19-0def-401f-a834-55fbaf4ed688",
       "name": "Send fallback (no user)",
@@ -682,6 +798,8 @@
     },
     {
       "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
         "chatId": "={{$json.message.chat.id}}",
         "text": "Отправь текстовый ответ или фото. Для начала нажми /start.",
         "additionalFields": {}
@@ -1273,3 +1391,4 @@
     "instanceId": "7715b9e43263936ef7d5ead15b70c021d76e29a9bc1abb07d28243b86cc28821"
   }
 }
+
