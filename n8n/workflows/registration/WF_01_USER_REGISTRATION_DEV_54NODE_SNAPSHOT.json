@@ -1,0 +1,1242 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "1ca6f8d4-4bae-458e-a3fe-faf7a349619b",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        784
+      ],
+      "webhookId": "cf5f5d5f-8ab5-4914-8b5e-e79053bcbcbd",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.callback_query !== undefined}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "ff0f12cf-81cf-4664-ab55-14b25618c049",
+      "name": "Is callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        176,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.callback_query.data === 'role:man' || $json.callback_query.data === 'role:woman'}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "0ded687f-ef79-4a1e-8625-6ca92a2cabf7",
+      "name": "Is role callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        400,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "={{$json.callback_query.from.id}}"
+            },
+            {
+              "name": "callback_query_id",
+              "value": "={{$json.callback_query.id}}"
+            },
+            {
+              "name": "chat_id",
+              "value": "={{$json.callback_query.message.chat.id}}"
+            },
+            {
+              "name": "callback_data",
+              "value": "={{$json.callback_query.data}}"
+            },
+            {
+              "name": "role",
+              "value": "={{$json.callback_query.data === 'role:man' ? 'man' : ($json.callback_query.data === 'role:woman' ? 'woman' : '')}}"
+            },
+            {
+              "name": "confirmation_text",
+              "value": "={{$json.callback_query.data === 'role:man' ? 'Роль сохранена: Мужчина.' : ($json.callback_query.data === 'role:woman' ? 'Роль сохранена: Девушка.' : 'Действие не распознано.')}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9ef71fb7-2feb-4665-b8a6-1d0a3e08eacd",
+      "name": "Extract role vars",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        624,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  (\n    SELECT user_id::text\n    FROM telegram_accounts\n    WHERE telegram_id = {{$('Extract role vars').item.json.telegram_id}}\n    LIMIT 1\n  ) AS user_id;",
+        "additionalFields": {}
+      },
+      "id": "68a7292f-543e-41e5-bc4d-8379736b272c",
+      "name": "Resolve user",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        848,
+        208
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "LUwCplWn74xgKcxq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.user_id !== null && $json.user_id !== undefined}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "7656bdf6-f35b-4152-b0fe-f7460aa20fed",
+      "name": "User found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE users\nSET role = '{{$('Extract role vars').item.json.role}}',\n    updated_at = now()\nWHERE id = '{{$json.user_id}}'\nRETURNING id;",
+        "additionalFields": {}
+      },
+      "id": "8b9d9c1f-722a-4f10-9a8d-e17823d516d3",
+      "name": "Update role",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        112
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "LUwCplWn74xgKcxq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{$('Extract role vars').item.json.callback_query_id}}",
+        "additionalFields": {}
+      },
+      "id": "54e9d58f-09d0-4aa0-9179-fd823c5d165c",
+      "name": "answerCallbackQuery",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        112
+      ],
+      "webhookId": "f442ba3b-9472-4410-b528-1a087a93fb03",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract role vars').item.json.chat_id}}",
+        "text": "={{$('Extract role vars').item.json.confirmation_text}}",
+        "additionalFields": {}
+      },
+      "id": "d266a329-d27a-4261-9e6b-c4a4b6368029",
+      "name": "Send role confirm",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        112
+      ],
+      "webhookId": "5f79e060-a2b8-498c-914d-864e6eed9714",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_events\n(user_id, event_type, event_data)\nVALUES (\n  '{{$('Resolve user').item.json.user_id}}',\n  'role_selected',\n  jsonb_build_object(\n    'role', '{{$('Extract role vars').item.json.role}}',\n    'telegram_id', {{$('Extract role vars').item.json.telegram_id}},\n    'callback_query_id', '{{$('Extract role vars').item.json.callback_query_id}}'\n  )\n)\nRETURNING id;",
+        "additionalFields": {}
+      },
+      "id": "bc7d0949-cd34-41d5-9c7b-02d8b00cdfa4",
+      "name": "Insert role audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        112
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "LUwCplWn74xgKcxq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH existing AS (\n  SELECT\n    id,\n    user_id,\n    profile_id,\n    current_step,\n    COALESCE(ai_context, '{}'::jsonb) AS ai_context,\n    status\n  FROM profile_ai_sessions\n  WHERE user_id = '{{$(\"Resolve user\").item.json.user_id}}'\n    AND status = 'IN_PROGRESS'\n  ORDER BY created_at DESC\n  LIMIT 1\n), inserted AS (\n  INSERT INTO profile_ai_sessions (\n    user_id, profile_id, current_step, ai_context, status, created_at, updated_at\n  )\n  SELECT\n    '{{$(\"Resolve user\").item.json.user_id}}', NULL, 0, '{}'::jsonb, 'IN_PROGRESS', now(), now()\n  WHERE NOT EXISTS (SELECT 1 FROM existing)\n  RETURNING\n    id, user_id, profile_id, current_step, COALESCE(ai_context, '{}'::jsonb) AS ai_context, status\n)\nSELECT * FROM existing\nUNION ALL\nSELECT * FROM inserted\nLIMIT 1;",
+        "additionalFields": {}
+      },
+      "id": "75a495ff-f2fb-4fa5-b6e9-1df5735ba192",
+      "name": "Ensure profile session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        2192,
+        112
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "LUwCplWn74xgKcxq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "session_id",
+              "value": "={{$json.id}}"
+            },
+            {
+              "name": "current_step",
+              "value": "={{$json.current_step}}"
+            },
+            {
+              "name": "question_text",
+              "value": "={{['Как тебя зовут?','Сколько тебе лет?','В каком городе живёшь?','Расскажи немного о себе.','Какие у тебя интересы?','Какова цель знакомства?','Расскажи о своих хобби. Можно пропустить.','Чем ты занимаешься / где работаешь? Можно пропустить.','Какое у тебя образование? Можно пропустить.','Какой стиль общения тебе ближе? Можно пропустить.'][$json.current_step] || 'Анкета уже заполнена.'}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3ec19ad9-aee9-4ac5-9761-1739e5b6761b",
+      "name": "Prepare onboarding question",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        2416,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$(\"Extract role vars\").item.json.chat_id}}",
+        "text": "={{$(\"Prepare onboarding question\").item.json.question_text}}",
+        "additionalFields": {}
+      },
+      "id": "6ea447f2-71ee-4347-a780-3ac38ad2ee1c",
+      "name": "Send onboarding question",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        112
+      ],
+      "webhookId": "68295c06-89d6-46ae-b393-df926d9dfa12",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{$('Extract role vars').item.json.callback_query_id}}",
+        "additionalFields": {
+          "text": "Сначала нажмите /start"
+        }
+      },
+      "id": "56cbe8dc-0f69-4f57-8dc4-ece104fbde83",
+      "name": "answerCallbackQuery (not found)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        304
+      ],
+      "webhookId": "28098f64-6534-4bff-a475-ea1cc9b11322",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract role vars').item.json.chat_id}}",
+        "text": "Сначала нажмите /start",
+        "additionalFields": {}
+      },
+      "id": "9aa6dbae-1bda-44f6-bdb0-3fa4a2233f29",
+      "name": "Send start prompt",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        304
+      ],
+      "webhookId": "ae7ae2d8-c970-4453-9803-d3eece4547d1",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{$json.callback_query.id}}",
+        "additionalFields": {
+          "text": "Действие не распознано."
+        }
+      },
+      "id": "ff9de0c5-81d0-478d-9e41-2844098332a8",
+      "name": "answerCallbackQuery (unknown)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        624,
+        400
+      ],
+      "webhookId": "db7bf00f-63ba-4c10-958b-7af749827b94",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.message && $json.message.photo !== undefined}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "c6d2214a-e60e-47f2-9578-cf0f414b50eb",
+      "name": "Is photo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        400,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "={{$json.message.from.id}}"
+            },
+            {
+              "name": "chat_id",
+              "value": "={{$json.message.chat.id}}"
+            },
+            {
+              "name": "file_id",
+              "value": "={{$json.message.photo[$json.message.photo.length - 1].file_id}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "62f67f6e-cc68-4189-8366-13e628eb23ea",
+      "name": "Extract photo vars",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        624,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ta AS (\n  SELECT user_id FROM telegram_accounts WHERE telegram_id = {{$('Extract photo vars').item.json.telegram_id}} LIMIT 1\n),\nprof AS (\n  SELECT id FROM profiles WHERE user_id = (SELECT user_id FROM ta) LIMIT 1\n),\nins_photo AS (\n  INSERT INTO profile_photos (profile_id, telegram_file_id, position)\n  SELECT (SELECT id FROM prof),\n         '{{$('Extract photo vars').item.json.file_id}}',\n         COALESCE((SELECT MAX(position) FROM profile_photos WHERE profile_id = (SELECT id FROM prof)), -1) + 1\n  WHERE EXISTS (SELECT 1 FROM prof)\n    AND NOT EXISTS (\n      SELECT 1 FROM profile_photos\n      WHERE profile_id = (SELECT id FROM prof)\n        AND telegram_file_id = '{{$('Extract photo vars').item.json.file_id}}'\n    )\n  RETURNING id\n),\nupd_session AS (\n  UPDATE profile_ai_sessions s\n  SET ai_context = jsonb_set(\n        COALESCE(s.ai_context, '{}'::jsonb),\n        '{pending_photos}',\n        COALESCE(s.ai_context->'pending_photos', '[]'::jsonb)\n          || jsonb_build_array(jsonb_build_object(\n               'telegram_file_id', '{{$('Extract photo vars').item.json.file_id}}',\n               'position', COALESCE(jsonb_array_length(s.ai_context->'pending_photos'), 0)\n             )),\n        true\n      ),\n      updated_at = now()\n  WHERE s.user_id = (SELECT user_id FROM ta)\n    AND s.status = 'IN_PROGRESS'\n    AND NOT EXISTS (SELECT 1 FROM prof)\n    AND NOT EXISTS (\n      SELECT 1 FROM jsonb_array_elements(COALESCE(s.ai_context->'pending_photos', '[]'::jsonb)) pe\n      WHERE pe->>'telegram_file_id' = '{{$('Extract photo vars').item.json.file_id}}'\n    )\n  RETURNING s.id\n)\nSELECT\n  (SELECT id FROM prof)::text AS profile_id,\n  (SELECT count(*) FROM ins_photo) AS photo_inserted,\n  (SELECT count(*) FROM upd_session) AS session_updated;",
+        "additionalFields": {}
+      },
+      "id": "4ddac8b0-1547-4c11-bc44-e4e77f55c0cf",
+      "name": "Save photo metadata",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        848,
+        592
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "LUwCplWn74xgKcxq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{Number($json.photo_inserted) > 0 || Number($json.session_updated) > 0}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "942c4c65-85c4-452b-9f41-35c6809ed151",
+      "name": "Photo saved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract photo vars').item.json.chat_id}}",
+        "text": "Фото получено.",
+        "additionalFields": {}
+      },
+      "id": "e5d16aca-accd-4256-803b-0cf00bc37eac",
+      "name": "Send photo confirm",
+      "type": "n8n-nodes-base.telegram",
+      "typeVers…6943 tokens truncated…        "postgres": {
+          "id": "LUwCplWn74xgKcxq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_events (user_id, event_type, event_data)\nSELECT '{{$('Validate answer').item.json.user_id}}', 'profile_created',\n  jsonb_build_object('profile_id', '{{$('Finalize profile').item.json.profile_id}}')\nWHERE NOT EXISTS (\n  SELECT 1 FROM audit_events\n  WHERE event_type = 'profile_created'\n    AND event_data->>'profile_id' = '{{$('Finalize profile').item.json.profile_id}}'\n)\nRETURNING id;",
+        "additionalFields": {}
+      },
+      "id": "c9a82b98-a5fc-4cb3-b3a3-30eb6cbdab31",
+      "name": "Create profile audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        3312,
+        1024
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "LUwCplWn74xgKcxq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO profile_moderation (profile_id, moderator_type, status)\nSELECT '{{$('Finalize profile').item.json.profile_id}}', 'AI', 'PENDING'\nWHERE NOT EXISTS (\n  SELECT 1 FROM profile_moderation\n  WHERE profile_id = '{{$('Finalize profile').item.json.profile_id}}' AND status = 'PENDING'\n)\nRETURNING id;",
+        "additionalFields": {}
+      },
+      "id": "7e39f99b-b876-4690-a7a2-5bfc54d18751",
+      "name": "Trigger moderation",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        3536,
+        1024
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "LUwCplWn74xgKcxq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Validate answer').item.json.chat_id}}",
+        "text": "Спасибо! Твоя анкета заполнена и отправлена на модерацию.",
+        "additionalFields": {}
+      },
+      "id": "f3ef14b3-97b1-4976-b280-fd6cebad1f87",
+      "name": "Send finalize message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        3760,
+        1024
+      ],
+      "webhookId": "a1a762d0-30a4-4c9b-ad60-acf5b66bdf9a",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "current_step",
+              "value": "={{$json.current_step}}"
+            },
+            {
+              "name": "question_text",
+              "value": "={{['Как тебя зовут?','Сколько тебе лет?','В каком городе живёшь?','Расскажи немного о себе.','Какие у тебя интересы?','Какова цель знакомства?','Расскажи о своих хобби. Можно пропустить.','Чем ты занимаешься / где работаешь? Можно пропустить.','Какое у тебя образование? Можно пропустить.','Какой стиль общения тебе ближе? Можно пропустить.'][$json.current_step] || 'Анкета уже заполнена.'}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8d9d050b-6919-4cb5-a856-f294954027d3",
+      "name": "Prepare next question",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        2864,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Validate answer').item.json.chat_id}}",
+        "text": "={{$(\"Prepare next question\").item.json.question_text}}",
+        "additionalFields": {}
+      },
+      "id": "42925ac7-a9f3-4c01-ab73-4fe2fa47db61",
+      "name": "Send next question",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        3088,
+        1216
+      ],
+      "webhookId": "c487bf4d-6a71-4e4e-a6d1-dd0a92550f42",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract message vars').item.json.chat_id}}",
+        "text": "={{$('Validate answer').item.json.error_message}}",
+        "additionalFields": {}
+      },
+      "id": "91864a49-4274-4d47-b2d8-f32810290a64",
+      "name": "Send validation error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        2416,
+        1312
+      ],
+      "webhookId": "ed8dc2c8-c112-4443-93c3-322f59e61ed3",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract message vars').item.json.chat_id}}",
+        "text": "Сейчас нет активной анкеты. Нажмите /start, чтобы начать.",
+        "additionalFields": {}
+      },
+      "id": "37cb8e83-7297-4fe7-bb67-a185e48efe78",
+      "name": "Send fallback (no session)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        1408
+      ],
+      "webhookId": "63d16425-3bf2-43c7-82d4-6395bc18769b",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract message vars').item.json.chat_id}}",
+        "text": "Чтобы начать, нажмите /start",
+        "additionalFields": {}
+      },
+      "id": "535b3e19-0def-401f-a834-55fbaf4ed688",
+      "name": "Send fallback (no user)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        1504
+      ],
+      "webhookId": "7023ad27-d9c4-4fac-a1fb-5f76c588c598",
+      "credentials": {
+        "telegramApi": {
+          "id": "IavKZ32AamAnJ72b",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Is callback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is callback?": {
+      "main": [
+        [
+          {
+            "node": "Is role callback?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is photo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is role callback?": {
+      "main": [
+        [
+          {
+            "node": "Extract role vars",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "answerCallbackQuery (unknown)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract role vars": {
+      "main": [
+        [
+          {
+            "node": "Resolve user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve user": {
+      "main": [
+        [
+          {
+            "node": "User found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User found?": {
+      "main": [
+        [
+          {
+            "node": "Update role",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "answerCallbackQuery (not found)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update role": {
+      "main": [
+        [
+          {
+            "node": "answerCallbackQuery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "answerCallbackQuery": {
+      "main": [
+        [
+          {
+            "node": "Send role confirm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send role confirm": {
+      "main": [
+        [
+          {
+            "node": "Insert role audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert role audit": {
+      "main": [
+        [
+          {
+            "node": "Ensure profile session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure profile session": {
+      "main": [
+        [
+          {
+            "node": "Prepare onboarding question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare onboarding question": {
+      "main": [
+        [
+          {
+            "node": "Send onboarding question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "answerCallbackQuery (not found)": {
+      "main": [
+        [
+          {
+            "node": "Send start prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is photo?": {
+      "main": [
+        [
+          {
+            "node": "Extract photo vars",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is /start?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract photo vars": {
+      "main": [
+        [
+          {
+            "node": "Save photo metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save photo metadata": {
+      "main": [
+        [
+          {
+            "node": "Photo saved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Photo saved?": {
+      "main": [
+        [
+          {
+            "node": "Send photo confirm",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send photo fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is /start?": {
+      "main": [
+        [
+          {
+            "node": "Extract User Info",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract message vars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract User Info": {
+      "main": [
+        [
+          {
+            "node": "Check user exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check user exists": {
+      "main": [
+        [
+          {
+            "node": "User exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User exists?": {
+      "main": [
+        [
+          {
+            "node": "Update telegram_account",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update telegram_account": {
+      "main": [
+        [
+          {
+            "node": "Load start session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load start session": {
+      "main": [
+        [
+          {
+            "node": "Has start session?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has start session?": {
+      "main": [
+        [
+          {
+            "node": "Prepare resume question",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare resume question": {
+      "main": [
+        [
+          {
+            "node": "Send resume question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create user": {
+      "main": [
+        [
+          {
+            "node": "Create telegram_account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create telegram_account": {
+      "main": [
+        [
+          {
+            "node": "Create audit_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create audit_event": {
+      "main": [
+        [
+          {
+            "node": "Send welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract message vars": {
+      "main": [
+        [
+          {
+            "node": "Resolve text user",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve text user": {
+      "main": [
+        [
+          {
+            "node": "Text user found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text user found?": {
+      "main": [
+        [
+          {
+            "node": "Load active session",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send fallback (no user)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load active session": {
+      "main": [
+        [
+          {
+            "node": "Has active session?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has active session?": {
+      "main": [
+        [
+          {
+            "node": "Validate answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send fallback (no session)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate answer": {
+      "main": [
+        [
+          {
+            "node": "Answer valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer valid?": {
+      "main": [
+        [
+          {
+            "node": "Save answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send validation error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save answer": {
+      "main": [
+        [
+          {
+            "node": "Onboarding complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Onboarding complete?": {
+      "main": [
+        [
+          {
+            "node": "Finalize profile",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare next question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize profile": {
+      "main": [
+        [
+          {
+            "node": "Complete session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete session": {
+      "main": [
+        [
+          {
+            "node": "Create profile audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create profile audit": {
+      "main": [
+        [
+          {
+            "node": "Trigger moderation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger moderation": {
+      "main": [
+        [
+          {
+            "node": "Send finalize message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare next question": {
+      "main": [
+        [
+          {
+            "node": "Send next question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "5ed5e149a3fe25d96fa35441656f0e3fc5e15ed200ec8fd1874574d9faceb783"
+  }
+}
