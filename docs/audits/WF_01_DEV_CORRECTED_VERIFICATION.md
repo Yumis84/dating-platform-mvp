@@ -2,7 +2,7 @@
 
 Date: 2026-08-11
 
-Status: **STATIC PASS. Ready for user review and a future n8n draft-only import test. Not approved for activation or production publish.**
+Status: **STATIC + SERVER DRAFT PASS. Imported only as a separate inactive DEV workflow. Not approved for execution, activation, or production publish.**
 
 ## Artifact
 
@@ -11,7 +11,7 @@ Status: **STATIC PASS. Ready for user review and a future n8n draft-only import 
 - Nodes: 56
 - Connection sources: 43
 - Edges: 56
-- SHA-256: `cf29ddaf66f0578c0379cb4c67e96879b41833fa44f2ef701be3f48451e7f1f7`
+- SHA-256: `69e4c9d948f562754bfe5c6a21529ebc56f709a01984fdaa46f1f5f6a8e84792`
 - Target `meta.instanceId`: `7715b9e43263936ef7d5ead15b70c021d76e29a9bc1abb07d28243b86cc28821`
 
 Two nodes were added to the 54-node source:
@@ -37,6 +37,7 @@ This prevents stickers, voice messages, contacts, locations, and documents from 
 - All Telegram nodes use the server baseline credential ID `iq6xvKahi25BYuys` / `@vstrechi18bot`.
 - All Postgres nodes use the server baseline credential ID `caq2JyQzouyoC7gv`.
 - Callback nodes explicitly specify `operation = answerQuery`.
+- Telegram message nodes explicitly specify `resource = message` and `operation = sendMessage`.
 - Unknown callbacks remain isolated from role updates.
 
 Credential IDs are instance-local identifiers, not secrets. No bot token, database password, or credential payload is stored in the JSON.
@@ -45,7 +46,7 @@ Credential IDs are instance-local identifiers, not secrets. No bot token, databa
 
 - Dynamic values on the main registration, session, answer, photo, finalization, and verification paths use `$1...$N` PostgreSQL parameters.
 - Because these nodes remain `n8n-nodes-base.postgres` typeVersion 1 for server compatibility, parameters are supplied through `additionalFields.queryParams` as input-item property names.
-- `Insert role audit` retains two direct n8n expressions, but both values are constrained upstream: the UUID comes from PostgreSQL and role is limited to `man|woman` by callback routing and the update query.
+- `Insert role audit` retains two direct n8n expressions, but the query is explicitly marked as an n8n expression (`=` prefix) and both values are constrained upstream: the UUID comes from PostgreSQL and role is limited to `man|woman` by callback routing and the update query.
 - Profile answer JSON is passed as a PostgreSQL parameter and cast to JSONB; manual quote construction was removed.
 
 The typeVersion 1 parameter format was checked against the official n8n Postgres V1 implementation:
@@ -110,6 +111,12 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Legacy temporary `SELECT 'man'`: absent
 - Legacy `field_value_sql`: absent
 - Destructive SQL/migrations: absent
+- n8n server node-config validation: 56/56 PASS
+- n8n Workflow SDK validation: PASS, 56 nodes, no warnings
+- Draft import target: `eMMEhEMrqFe35F7l` (`WF_01_USER_REGISTRATION_DEV_CORRECTED_56NODE`)
+- Imported draft graph: 56 nodes, 56 edges, 56 unique names/IDs, no missing endpoints/references
+- Imported draft state: `active = false`, `activeVersionId = null`, `triggerCount = 0`
+- Existing `WF_01_USER_REGISTRATION_0001` and `WF_01_USER_REGISTRATION copy` were not overwritten
 
 ## Remaining boundaries
 
@@ -119,8 +126,9 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Existing duplicate profiles/sessions/photos, if already present, are not deleted or reconciled.
 - The workflow queues `profile_moderation`; it does not call WF_04 directly. A separate worker/webhook contract is still required if no moderation worker polls this table.
 - No photo-count policy was added because no product limit was confirmed.
-- The corrected JSON has not been imported into n8n, activated, or published.
+- The corrected JSON was compiled through the n8n Workflow SDK and imported as a separate inactive DEV workflow. It was not executed, activated, or published.
 
 ## Safe next step
 
-After user review, import/paste this artifact into a **draft-only** workflow, confirm credential bindings and node parameters in the server UI, run non-production test data through each branch, and inspect the draft again. Production publish still requires a separate explicit approval.
+Confirm the two credential bindings and node parameters in the server UI. Before any execution, verify that the Postgres credential points to a non-production test database; only then run branch smoke tests with test Telegram data. Production publish still requires a separate explicit approval.
+
