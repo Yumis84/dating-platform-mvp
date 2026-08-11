@@ -2,7 +2,7 @@
 
 Date: 2026-08-11
 
-Status: **STATIC + SERVER DRAFT + SAFE SMOKE PASS. Imported only as a separate inactive DEV workflow. Not approved for activation or production publish.**
+Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS. Imported only as a separate inactive DEV workflow. Not approved for activation or production publish.**
 
 ## Artifact
 
@@ -123,12 +123,18 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Test-database SQL schema parsing: 18/18 PASS via `PREPARE` + `DEALLOCATE`, execution `4453`
 - SQL-check workflow: `JW6qb1wq00gqlCxN` (`WF_01_DEV_SQL_SCHEMA_CHECK`), 2 nodes, `active = false`, `activeVersionId = null`
 - SQL-check statement counts: 18 `PREPARE`, 18 `DEALLOCATE`, 0 `EXECUTE`; PostgreSQL node error: none
+- Isolated DB integration workflow: `MfVFPQTSY2LXXPjq` (`WF_01_DEV_DB_INTEGRATION_CHECK`), 2 nodes, `active = false`, `activeVersionId = null`
+- DB integration execution `4479`: PASS, 33/33 runtime invariants, `cleanup = VERIFIED`, PostgreSQL node error: none
+- Runtime coverage: `users.role = NULL` registration, validated role update, registration/audit idempotency, resumable session, answers `0..9`, pending-photo deduplication, finalization, `PENDING_MODERATION`, `COMPLETED`, preferences mapping, profile-photo positions `0/1`, moderation and duplicate protections
+- The DB integration harness contains no Telegram nodes. It uses one synthetic Telegram ID and exact generated identifiers; all created rows are deleted by exact ID in the same PostgreSQL `DO` transaction
+- Harness execution `4478` stopped at SQL parse time before DML because the harness generator emitted JavaScript identifier quotes for text literals. The harness-only escaping was corrected and revalidated before successful execution `4479`; corrected WF_01 SQL was unchanged
 - Existing `WF_01_USER_REGISTRATION_0001` and `WF_01_USER_REGISTRATION copy` were not overwritten
 
 ## Remaining boundaries
 
 - This is still a canvas snapshot (`nodes/connections/pinData/meta`), not a full workflow export with workflow ID, active state, settings, and draft/active version IDs.
 - All 18 SQL statements were parsed and type-checked by the confirmed test PostgreSQL database through `PREPARE`; no prepared statement was executed, so no `INSERT`, `UPDATE`, or `DELETE` took effect.
+- A separate isolated integration harness then executed the corrected registration/onboarding/finalization SQL against the confirmed test database. Its 33 assertions passed and its final cleanup assertion verified that no synthetic user, Telegram account, profile, session, audit, photo, or moderation rows remained.
 - Advisory locks protect executions using this corrected workflow. Absolute cross-system guarantees still require future additive unique indexes after a duplicate-data audit; no migration was created or applied here.
 - Existing duplicate profiles/sessions/photos, if already present, are not deleted or reconciled.
 - The workflow queues `profile_moderation`; it does not call WF_04 directly. A separate worker/webhook contract is still required if no moderation worker polls this table.
@@ -137,5 +143,5 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 
 ## Safe next step
 
-Run a deliberately isolated end-to-end test with a dedicated Telegram test account against the confirmed test database, then inspect the created rows and moderation state. Production publish still requires a separate explicit approval.
+Run an end-to-end Telegram transport test with a dedicated Telegram test account while keeping the corrected workflow isolated from production, then inspect the created rows and moderation state. This requires coordinating the test account and bot webhook/manual-listen window. Production publish still requires a separate explicit approval.
 
