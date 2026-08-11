@@ -2,16 +2,21 @@
 
 ```text
 Telegram /start
--> find or create users + telegram_accounts
+-> atomically find or create users(role=NULL) + telegram_accounts
 -> select role
--> persist role + audit
+-> persist the first valid role; reject a later opposite role
    -> MAN: resolve/confirm name -> city -> catalog choice
-   -> WOMAN: create/resume DRAFT profile session -> WF_03
+   -> WOMAN: create/resume DRAFT profile session
+      -> POST TEXT/PHOTO payload to WF_03
 ```
 
 ## MAN name
 
 Telegram `first_name` is only a suggestion. If present, show `Оставить` / `Изменить`. Persist the explicitly confirmed or manually entered value in `male_search_context`.
+
+The resumable states are `AWAITING_NAME_CONFIRMATION`,
+`AWAITING_MANUAL_NAME`, `AWAITING_CITY`, and `COMPLETED`. `/start`
+resumes the state and is never persisted as a name or city.
 
 ## MAN completion
 

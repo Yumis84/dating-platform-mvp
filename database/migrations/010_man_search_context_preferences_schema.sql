@@ -10,12 +10,17 @@ CREATE TABLE IF NOT EXISTS male_search_context (
   name_confirmed_at TIMESTAMP WITH TIME ZONE,
   city TEXT CHECK (city IS NULL OR NULLIF(btrim(city), '') IS NOT NULL),
   city_normalized TEXT CHECK (city_normalized IS NULL OR NULLIF(btrim(city_normalized), '') IS NOT NULL),
-  onboarding_status TEXT NOT NULL DEFAULT 'IN_PROGRESS'
-    CHECK (onboarding_status IN ('IN_PROGRESS', 'COMPLETED')),
+  onboarding_state TEXT NOT NULL DEFAULT 'AWAITING_MANUAL_NAME'
+    CHECK (onboarding_state IN (
+      'AWAITING_NAME_CONFIRMATION',
+      'AWAITING_MANUAL_NAME',
+      'AWAITING_CITY',
+      'COMPLETED'
+    )),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   CHECK (
-    onboarding_status <> 'COMPLETED' OR (
+    onboarding_state <> 'COMPLETED' OR (
       name IS NOT NULL AND name_source IS NOT NULL AND name_confirmed_at IS NOT NULL
       AND city IS NOT NULL AND city_normalized IS NOT NULL
     )
@@ -23,7 +28,9 @@ CREATE TABLE IF NOT EXISTS male_search_context (
 );
 
 COMMENT ON TABLE male_search_context IS
-  'Private resumable MAN onboarding state. COMPLETED requires confirmed name and hard-filter catalog city.';
+  'Private resumable MAN onboarding state machine. COMPLETED requires confirmed name and hard-filter catalog city.';
+COMMENT ON COLUMN male_search_context.onboarding_state IS
+  'Expected next MAN event. Arbitrary text is persisted only in AWAITING_MANUAL_NAME or AWAITING_CITY.';
 COMMENT ON COLUMN male_search_context.city IS
   'User-facing city value confirmed by the MAN user.';
 COMMENT ON COLUMN male_search_context.city_normalized IS

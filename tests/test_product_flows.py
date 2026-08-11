@@ -44,6 +44,7 @@ class WorkflowStaticTests(unittest.TestCase):
                 self.assertEqual(len(names), len(set(names)))
                 self.assertEqual(len(ids), len(set(ids)))
                 known = set(names)
+                reachable = {names[0]}
                 for node in workflow["nodes"]:
                     payload = json.dumps(node.get("parameters", {}), ensure_ascii=False)
                     for match in reference_pattern.finditer(payload):
@@ -55,6 +56,19 @@ class WorkflowStaticTests(unittest.TestCase):
                         for branch in outputs:
                             for edge in branch:
                                 self.assertIn(edge["node"], known)
+                changed = True
+                while changed:
+                    changed = False
+                    for source, streams in workflow.get("connections", {}).items():
+                        if source not in reachable:
+                            continue
+                        for outputs in streams.values():
+                            for branch in outputs:
+                                for edge in branch:
+                                    if edge["node"] not in reachable:
+                                        reachable.add(edge["node"])
+                                        changed = True
+                self.assertEqual(reachable, known, f"unreachable nodes: {known - reachable}")
 
     def test_postgres_nodes_use_positional_parameters(self):
         for name, path in WORKFLOWS.items():
@@ -63,9 +77,17 @@ class WorkflowStaticTests(unittest.TestCase):
                 if node["type"] != "n8n-nodes-base.postgres":
                     continue
                 query = node["parameters"].get("query", "")
+                query_params = [
+                    item.strip()
+                    for item in node["parameters"].get("additionalFields", {}).get("queryParams", "").split(",")
+                    if item.strip()
+                ]
+                placeholders = [int(value) for value in re.findall(r"\$([1-9][0-9]*)", query)]
                 with self.subTest(workflow=name, node=node["name"]):
                     self.assertNotIn("{{", query)
                     self.assertRegex(query, r"\$[1-9]")
+                    self.assertEqual(max(placeholders), len(query_params))
+                    self.assertEqual(set(placeholders), set(range(1, max(placeholders) + 1)))
 
     def test_woman_flow_uses_tz02_fields_and_real_ai_call(self):
         raw = WORKFLOWS["wf03"].read_text(encoding="utf-8")
@@ -81,10 +103,40 @@ class WorkflowStaticTests(unittest.TestCase):
 
     def test_man_flow_has_confirmation_and_no_generic_questionnaire(self):
         raw = WORKFLOWS["wf01"].read_text(encoding="utf-8")
-        for expected in ("man_name:keep", "man_name:change", "male_search_context", "normalize_city_name"):
+        for expected in (
+            "man_name:keep", "man_name:change", "male_search_context",
+            "normalize_city_name", "AWAITING_NAME_CONFIRMATION",
+            "AWAITING_MANUAL_NAME", "AWAITING_CITY", "WF_03_TRIGGER_URL",
+            "Register or Resolve Telegram User", "role_decision",
+        ):
             self.assertIn(expected, raw)
         for obsolete in ("communication_style", "hobbies", "education"):
             self.assertNotIn(obsolete, raw)
+
+    def test_start_role_and_woman_handoff_contracts(self):
+        workflow = load_workflow(WORKFLOWS["wf01"])
+        normalize = next(node for node in workflow["nodes"] if node["name"] == "Normalize Telegram Event")
+        self.assertIn("action='START'", normalize["parameters"]["jsCode"])
+        self.assertIn("UNKNOWN_COMMAND", normalize["parameters"]["jsCode"])
+        state = next(node for node in workflow["nodes"] if node["name"] == "Apply Role and Onboarding Event")
+        query = state["parameters"]["query"]
+        self.assertIn("role IS NULL", query)
+        self.assertIn("'REJECTED'", query)
+        self.assertIn("pg_advisory_xact_lock", query)
+        handoff = next(node for node in workflow["nodes"] if node["name"] == "Handoff WOMAN Event to WF_03")
+        for key in ("telegram_id", "chat_id", "update_type", "message_text", "photo_file_id", "user_id", "profile_id", "session_id"):
+            self.assertIn(key, handoff["parameters"]["body"])
+
+    def test_woman_collection_and_photo_persistence_is_explicit(self):
+        workflow = load_workflow(WORKFLOWS["wf03"])
+        persist = next(node for node in workflow["nodes"] if node["name"] == "Persist WOMAN Extraction")
+        query = persist["parameters"]["query"]
+        for operation in ("APPEND", "UPDATE", "DELETE"):
+            self.assertIn(operation, query)
+        self.assertNotIn("ON CONFLICT(profile_id,position) DO UPDATE", query)
+        photo = next(node for node in workflow["nodes"] if node["name"] == "Save WOMAN Photo")
+        self.assertIn("pg_advisory_xact_lock", photo["parameters"]["query"])
+        self.assertIn("telegram_file_id", photo["parameters"]["query"])
 
 
 class SchemaAndRankingTests(unittest.TestCase):
@@ -97,7 +149,11 @@ class SchemaAndRankingTests(unittest.TestCase):
         man = (ROOT / "database/migrations/010_man_search_context_preferences_schema.sql").read_text(encoding="utf-8")
         for token in ("city_normalized", "district", "height_cm", "weight_kg", "breast_size", "profile_prices", "profile_meeting_places"):
             self.assertIn(token, woman)
-        for token in ("male_search_context", "male_search_preferences", "onboarding_status", "TELEGRAM_CONFIRMED"):
+        for token in (
+            "male_search_context", "male_search_preferences", "onboarding_state",
+            "AWAITING_NAME_CONFIRMATION", "AWAITING_MANUAL_NAME",
+            "AWAITING_CITY", "TELEGRAM_CONFIRMED",
+        ):
             self.assertIn(token, man)
 
     def test_ranking_candidate_where_has_only_product_hard_filters(self):

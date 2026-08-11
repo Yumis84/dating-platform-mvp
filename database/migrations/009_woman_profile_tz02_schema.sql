@@ -49,6 +49,16 @@ CREATE INDEX IF NOT EXISTS idx_profiles_active_city_normalized
   ON profiles(city_normalized, created_at DESC)
   WHERE status = 'ACTIVE';
 
+-- Workflow idempotency guards. These deliberately fail during a future
+-- preflight if duplicate DRAFT profiles or IN_PROGRESS sessions already exist.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_profiles_draft_per_user
+  ON profiles(user_id)
+  WHERE status = 'DRAFT';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_profile_ai_in_progress_per_user
+  ON profile_ai_sessions(user_id)
+  WHERE status = 'IN_PROGRESS';
+
 CREATE TABLE IF NOT EXISTS profile_prices (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,

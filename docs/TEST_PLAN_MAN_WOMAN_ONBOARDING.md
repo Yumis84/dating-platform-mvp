@@ -1,6 +1,6 @@
 # Test plan: role-separated onboarding and ranked catalog
 
-Status: repository/static test plan. Live execution requires separate approval.
+Status: repository test plan. Disposable PGlite execution is automated; live execution requires separate approval.
 
 ## MAN onboarding
 
@@ -44,7 +44,18 @@ Status: repository/static test plan. Live execution requires separate approval.
 
 ```powershell
 python -m unittest discover -s tests -v
+$env:PGLITE_MODULE_PATH='<path-to-@electric-sql/pglite>'
+node tests/runtime_product_flows.mjs
 git diff --check
 ```
 
-Additionally parse migration drafts, ranking SQL, and Postgres node queries with a PostgreSQL parser. Disposable-DB execution remains required before migration approval.
+The runtime suite executes canonical migrations 001/002/003/004/008 plus draft
+009/010 in a new in-memory PostgreSQL-compatible database and then executes the
+actual SQL extracted from WF_01/WF_03/WF_05. It verifies the 21 acceptance
+scenarios: registration/idempotency, first-wins role, MAN state, START routing,
+WOMAN profile/session/handoff, collection append, concurrent photos, and catalog
+candidate/ranking invariants.
+
+Additionally parse migration drafts, ranking SQL, and every Postgres node query
+with a PostgreSQL parser. A native PostgreSQL staging run remains required before
+any migration approval.

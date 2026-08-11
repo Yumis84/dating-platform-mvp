@@ -9,7 +9,7 @@ WITH viewer AS (
   FROM male_search_context context
   LEFT JOIN male_search_preferences preferences USING (user_id)
   WHERE context.user_id = $1::uuid
-    AND context.onboarding_status = 'COMPLETED'
+    AND context.onboarding_state = 'COMPLETED'
 ),
 candidates AS (
   SELECT p.*

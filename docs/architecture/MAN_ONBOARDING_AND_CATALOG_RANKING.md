@@ -11,7 +11,11 @@ role:man
 -> [Настроить предпочтения] / [Смотреть анкеты]
 ```
 
-`name` and `city` are the only required MAN onboarding values. `male_search_context` may hold an incomplete `IN_PROGRESS` row so the flow can resume; `COMPLETED` requires both values. A MAN never receives a public `profiles` row.
+`name` and `city` are the only required MAN onboarding values.
+`male_search_context.onboarding_state` is one of
+`AWAITING_NAME_CONFIRMATION`, `AWAITING_MANUAL_NAME`,
+`AWAITING_CITY`, or `COMPLETED`. `COMPLETED` requires both values.
+A MAN never receives a public `profiles` row.
 
 ### Name confirmation
 
