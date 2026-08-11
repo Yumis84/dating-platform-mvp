@@ -1,29 +1,7 @@
-# WF_05: Profile Catalog (updated — pagination + filters)
+# WF_05: ranked WOMAN catalog (inactive DEV)
 
-Trigger: Webhook (from WebApp)
+Input contains only authenticated MAN `user_id`, limit, and offset. City and preferences are loaded from PostgreSQL.
 
-Purpose
--------
-Return a paginated JSON list of ACTIVE profiles matching optional filters. The workflow also logs the search event for analytics.
+The candidate WHERE clause is restricted to ACTIVE, WOMAN owner, and normalized city equality. Optional preferences contribute to `matched_preferences`, `considered_preferences`, and `match_score`; they never remove candidates.
 
-Input
------
-- user_id (UUID)
-- filters (JSON) — optional, e.g., { "city": "Moscow", "age_from": 25, "age_to": 35 }
-- limit (int) — maximum number of items to return (max 50)
-- offset (int) — pagination offset
-
-Processing
-----------
-1. Record search filters into profile_search_events (analytics).
-2. Query profiles WHERE status = 'ACTIVE' and apply filters (city, age_from, age_to). Apply limit/offset.
-3. Return a JSON object with items array and total count.
-
-Response
---------
-{
-  "items": [ ... ],
-  "total": 123,
-  "limit": 25,
-  "offset": 0
-}
+The repository JSON and `database/queries/man_catalog_ranking_prototype.sql` are DEV drafts and have not been imported into n8n.

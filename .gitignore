@@ -11,3 +11,7 @@ node_modules/
 # Sensitive directories
 credentials/
 secrets/
+
+# Python test artifacts
+__pycache__/
+*.py[cod]

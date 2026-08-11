@@ -1,44 +1,22 @@
-# WF_03: AI Profile Agent
+# WF_03: WOMAN AI profile agent (inactive DEV)
 
-Trigger: Webhook when WF_02 triggers profile creation or when the user continues the AI dialog.
+This JSON is a repository-only, inactive DEV draft. It has not been imported into n8n.
 
-Purpose
--------
-Drive an AI‑assisted dialog to build a user profile. The workflow is resumable and idempotent: it will continue an existing profile_ai_session if present, or create a new session. After collecting mandatory fields it persists the profile (status = PENDING_MODERATION), creates an audit event and triggers WF_04 for moderation.
+Input: `user_id`, `session_id`, optional `text`, optional Telegram `photo_file_id`.
 
-Interaction model
------------------
-- The workflow accepts a small webhook payload with: user_id (required), session_id (optional), user_answer (optional), photo_file_id (optional).
-- If session_id is not provided, the workflow creates a new profile_ai_session and asks the first question.
-- If user_answer is provided, the workflow saves it into session.ai_context, increments current_step and asks the next question.
-- The workflow supports photo metadata: Telegram file_id is saved in profile_photos with metadata only.
+The caller must already have created an IN_PROGRESS WOMAN session linked to a DRAFT profile. WF_03 verifies WOMAN role when loading that session.
 
-Mandatory fields/questions (order)
-1. name
-2. age
-3. city
-4. description
-5. interests
-6. purpose (goal of dating)
+Text is sent to DeepSeek with a strict JSON contract. `Validate AI Extraction` permits only TZ #2 scalar fields and structured `prices` / `meeting_places`; SQL uses positional parameters.
 
-Optional fields
-- hobbies
-- job
-- education
-- communication_style
+Progress is recomputed from persisted profile fields and child-row counts. `current_step` is updated to the next missing block and never advanced blindly.
 
-Resumption and idempotency
--------------------------
-- The workflow always loads the latest IN_PROGRESS profile_ai_session for the user if session_id isn't given.
-- If a completed profile exists for the user, the workflow will not create duplicates.
+Required completion blocks:
 
-Placeholders & credentials
---------------------------
-- Postgres credential uses POSTGRES_PLACEHOLDER and must be bound in n8n UI.
-- AI provider is called via HTTP using AI_API_URL and AI_API_KEY from environment.
-- WF_04_TRIGGER_URL environment variable should point to the internal webhook for WF_04 AI moderation.
+```text
+name, age, city, district, height, weight, breast_size,
+description, >=1 photo, >=1 price, >=1 meeting place
+```
 
-Error handling
---------------
-- Each DB and HTTP node should surface errors to the n8n execution UI. Nodes can be set to continueOnFail where appropriate.
-- If the AI provider fails, the workflow returns a friendly error message and keeps the session IN_PROGRESS for retry.
+Finalization is a single PostgreSQL statement that completes the session, sets `PENDING_MODERATION`, creates one pending moderation row, and writes an idempotent audit event.
+
+Before any future import, validate the exact n8n node versions, bind existing credentials explicitly, add error/retry routes, and perform a disposable-DB integration test.

@@ -1,0 +1,161 @@
+{
+  "name": "WF_01_USER_REGISTRATION_MAN_WOMAN_DEV",
+  "active": false,
+  "settings": {"executionOrder": "v1"},
+  "nodes": [
+    {
+      "id": "wf01-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": {"updates": ["message", "callback_query"], "additionalFields": {}},
+      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}}
+    },
+    {
+      "id": "wf01-normalize",
+      "name": "Normalize Telegram Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "parameters": {
+        "jsCode": "const cb=$json.callback_query; const msg=$json.message; const from=cb?.from||msg?.from||{}; const data=String(cb?.data||''); const text=String(msg?.text||'').trim(); let action='UNKNOWN'; if(data==='role:man') action='ROLE_MAN'; else if(data==='role:woman') action='ROLE_WOMAN'; else if(data==='man_name:keep') action='MAN_NAME_KEEP'; else if(data==='man_name:change') action='MAN_NAME_CHANGE'; else if(data==='man_catalog:open') action='MAN_CATALOG'; else if(data==='man_preferences:open') action='MAN_PREFERENCES'; else if(text) action='TEXT'; return [{json:{telegram_id:String(from.id||''),telegram_first_name:String(from.first_name||'').trim(),username:String(from.username||''),chat_id:String(cb?.message?.chat?.id||msg?.chat?.id||from.id||''),callback_query_id:String(cb?.id||''),action,text}}];"
+      }
+    },
+    {
+      "id": "wf01-state",
+      "name": "Apply Role and Onboarding Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [440, 300],
+      "credentials": {"postgres": {"id": "POSTGRES_PLACEHOLDER", "name": "POSTGRES_PLACEHOLDER"}},
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (SELECT $1::bigint telegram_id,$2::text action,NULLIF(btrim($3::text),'') first_name,NULLIF(btrim($4::text),'') answer),\naccount AS (SELECT ta.user_id FROM telegram_accounts ta,input WHERE ta.telegram_id=input.telegram_id LIMIT 1),\nlocked AS (SELECT pg_advisory_xact_lock(hashtext(user_id::text)) FROM account),\nrole_update AS (UPDATE users u SET role=CASE input.action WHEN 'ROLE_MAN' THEN 'man' WHEN 'ROLE_WOMAN' THEN 'woman' ELSE u.role END,updated_at=now() FROM input,account,locked WHERE u.id=account.user_id RETURNING u.id,u.role),\ncontext_seed AS (INSERT INTO male_search_context(user_id) SELECT role_update.id FROM role_update WHERE role_update.role='man' ON CONFLICT(user_id) DO NOTHING RETURNING user_id),\nname_update AS (UPDATE male_search_context c SET name=CASE WHEN input.action='MAN_NAME_KEEP' THEN input.first_name WHEN input.action='TEXT' AND c.name IS NULL THEN input.answer ELSE c.name END,name_source=CASE WHEN input.action='MAN_NAME_KEEP' THEN 'TELEGRAM_CONFIRMED' WHEN input.action='TEXT' AND c.name IS NULL THEN 'MANUAL' ELSE c.name_source END,name_confirmed_at=CASE WHEN ((input.action IN ('MAN_NAME_KEEP','TEXT') AND c.name IS NULL) OR input.action='MAN_NAME_KEEP') THEN now() ELSE c.name_confirmed_at END,updated_at=now() FROM input,account WHERE c.user_id=account.user_id AND ((input.action='MAN_NAME_KEEP' AND input.first_name IS NOT NULL) OR (input.action='TEXT' AND c.name IS NULL AND input.answer IS NOT NULL)) RETURNING c.user_id),\ncity_update AS (UPDATE male_search_context c SET city=input.answer,city_normalized=normalize_city_name(input.answer),onboarding_status='COMPLETED',updated_at=now() FROM input,account WHERE c.user_id=account.user_id AND input.action='TEXT' AND c.name IS NOT NULL AND c.city IS NULL AND input.answer IS NOT NULL RETURNING c.user_id),\nwoman_profile AS (INSERT INTO profiles(user_id,status) SELECT account.user_id,'DRAFT' FROM account,input WHERE input.action='ROLE_WOMAN' AND NOT EXISTS(SELECT 1 FROM profiles p WHERE p.user_id=account.user_id) RETURNING id,user_id),\nwoman_session AS (INSERT INTO profile_ai_sessions(user_id,profile_id,current_step,ai_context,status) SELECT account.user_id,COALESCE((SELECT id FROM woman_profile),(SELECT id FROM profiles p WHERE p.user_id=account.user_id ORDER BY created_at LIMIT 1)),0,'{}'::jsonb,'IN_PROGRESS' FROM account,input WHERE input.action='ROLE_WOMAN' AND NOT EXISTS(SELECT 1 FROM profile_ai_sessions s WHERE s.user_id=account.user_id AND s.status='IN_PROGRESS') RETURNING id)\nSELECT account.user_id::text,input.action,(SELECT id::text FROM woman_session LIMIT 1) woman_session_id FROM input JOIN account ON true;",
+        "additionalFields": {"queryParams": "telegram_id,action,telegram_first_name,text"}
+      }
+    },
+    {
+      "id": "wf01-reload",
+      "name": "Reload Role State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [550, 300],
+      "credentials": {"postgres": {"id": "POSTGRES_PLACEHOLDER", "name": "POSTGRES_PLACEHOLDER"}},
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT u.id::text user_id,u.role,c.name,c.city,c.city_normalized,c.onboarding_status,$2::text action FROM users u LEFT JOIN male_search_context c ON c.user_id=u.id WHERE u.id=$1::uuid;",
+        "additionalFields": {"queryParams": "user_id,action"}
+      }
+    },
+    {
+      "id": "wf01-reply",
+      "name": "Prepare Role-Specific Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [770, 300],
+      "parameters": {
+        "jsCode": "const s=$json; const first=$('Normalize Telegram Event').item.json.telegram_first_name; let message='',reply_kind='PLAIN'; if(s.action==='UNKNOWN'){message='Неизвестная команда.';} else if(s.action==='ROLE_WOMAN'||s.role==='woman'){message='Продолжаем WOMAN-анкету в WF_03.';} else if(s.action==='MAN_CATALOG'){message='Открываем анкеты вашего города.';} else if(s.action==='MAN_PREFERENCES'){message='Открываем настройки предпочтений.';} else if(s.action==='MAN_NAME_CHANGE'){message='Как вас зовут?';} else if(!s.name&&first){message=`Ваше имя: ${first}`;reply_kind='NAME_CONFIRM';} else if(!s.name){message='Как вас зовут?';} else if(!s.city_normalized){message='В каком городе вы хотите смотреть анкеты?';} else {message='Настройте предпочтения или перейдите в каталог.';reply_kind='CATALOG_CHOICE';} return [{json:{...s,message,reply_kind}}];"
+      }
+    },
+    {
+      "id": "wf01-is-name-confirm",
+      "name": "Is MAN Name Confirmation",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 300],
+      "parameters": {"conditions": {"string": [{"value1": "={{$json.reply_kind}}", "operation": "equals", "value2": "NAME_CONFIRM"}]}}
+    },
+    {
+      "id": "wf01-send-name-confirm",
+      "name": "Send MAN Name Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1100, 160],
+      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
+      "parameters": {
+        "chatId": "={{$('Normalize Telegram Event').item.json.chat_id}}",
+        "text": "={{$json.message}}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {"rows": [{"row": {"buttons": [{"text": "Оставить", "additionalFields": {"callback_data": "man_name:keep"}}, {"text": "Изменить", "additionalFields": {"callback_data": "man_name:change"}}]}}]},
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "wf01-is-catalog-choice",
+      "name": "Is MAN Catalog Choice",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 380],
+      "parameters": {"conditions": {"string": [{"value1": "={{$json.reply_kind}}", "operation": "equals", "value2": "CATALOG_CHOICE"}]}}
+    },
+    {
+      "id": "wf01-send-catalog-choice",
+      "name": "Send MAN Catalog Choice",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1320, 320],
+      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
+      "parameters": {
+        "chatId": "={{$('Normalize Telegram Event').item.json.chat_id}}",
+        "text": "={{$json.message}}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {"rows": [{"row": {"buttons": [{"text": "Настроить предпочтения", "additionalFields": {"callback_data": "man_preferences:open"}}, {"text": "Смотреть анкеты", "additionalFields": {"callback_data": "man_catalog:open"}}]}}]},
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "wf01-send",
+      "name": "Send Role-Specific Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1320, 500],
+      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
+      "parameters": {
+        "chatId": "={{$('Normalize Telegram Event').item.json.chat_id}}",
+        "text": "={{$json.message}}",
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "wf01-has-callback",
+      "name": "Has Callback Query",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1210, 300],
+      "parameters": {"conditions": {"string": [{"value1": "={{$('Normalize Telegram Event').item.json.callback_query_id}}", "operation": "isNotEmpty"}]}}
+    },
+    {
+      "id": "wf01-ack",
+      "name": "Answer Callback Query",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1430, 220],
+      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
+      "parameters": {"resource": "callback", "queryId": "={{$('Normalize Telegram Event').item.json.callback_query_id}}", "additionalFields": {}}
+    },
+    {
+      "id": "wf01-done",
+      "name": "DEV Flow Complete",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1430, 420],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {"main": [[{"node": "Normalize Telegram Event", "type": "main", "index": 0}]]},
+    "Normalize Telegram Event": {"main": [[{"node": "Apply Role and Onboarding Event", "type": "main", "index": 0}]]},
+    "Apply Role and Onboarding Event": {"main": [[{"node": "Reload Role State", "type": "main", "index": 0}]]},
+    "Reload Role State": {"main": [[{"node": "Prepare Role-Specific Reply", "type": "main", "index": 0}]]},
+    "Prepare Role-Specific Reply": {"main": [[{"node": "Is MAN Name Confirmation", "type": "main", "index": 0}]]},
+    "Is MAN Name Confirmation": {"main": [[{"node": "Send MAN Name Confirmation", "type": "main", "index": 0}], [{"node": "Is MAN Catalog Choice", "type": "main", "index": 0}]]},
+    "Is MAN Catalog Choice": {"main": [[{"node": "Send MAN Catalog Choice", "type": "main", "index": 0}], [{"node": "Send Role-Specific Reply", "type": "main", "index": 0}]]},
+    "Send MAN Name Confirmation": {"main": [[{"node": "Has Callback Query", "type": "main", "index": 0}]]},
+    "Send MAN Catalog Choice": {"main": [[{"node": "Has Callback Query", "type": "main", "index": 0}]]},
+    "Send Role-Specific Reply": {"main": [[{"node": "Has Callback Query", "type": "main", "index": 0}]]},
+    "Has Callback Query": {"main": [[{"node": "Answer Callback Query", "type": "main", "index": 0}], [{"node": "DEV Flow Complete", "type": "main", "index": 0}]]}
+  },
+  "meta": {"devOnly": true, "templateCredsSetupCompleted": false},
+  "id": "WF_01_USER_REGISTRATION_MAN_WOMAN_DEV"
+}

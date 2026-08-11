@@ -1,44 +1,47 @@
-# Catalog API Design
+# Catalog API design
 
-This document describes the HTTP API surface used by the WebApp (Telegram WebApp) to interact with the catalog via n8n webhooks and PostgreSQL.
+## POST `/webhook/profile-catalog`
 
-Architecture
-------------
-WebApp
-  ↓ (HTTP)
-n8n Webhook
-  ↓ (Postgres queries)
-PostgreSQL (profiles, profile_photos, favorites, profile_views, profile_search_events)
+Input:
 
-Endpoints / Methods
--------------------
-- GET catalog (POST /webhook/profile-catalog)
-  - Input: user_id, filters, limit, offset
-  - Output: { items: [...], total, limit, offset }
-  - Notes: Returns only profiles with status = 'ACTIVE'.
+```json
+{
+  "user_id": "MAN user UUID",
+  "limit": 25,
+  "offset": 0
+}
+```
 
-- VIEW profile (POST /webhook/profile-view)
-  - Input: viewer_user_id, profile_id
-  - Output: profile card fields (id, name, age, city, avatar_file_id, description)
-  - Side effect: records profile_views
+The client does not send authoritative city or hard filters. WF_05 loads the confirmed city and optional preferences from PostgreSQL.
 
-- ADD favorite / REMOVE favorite / TOGGLE (POST /webhook/favorites)
-  - Input: user_id, profile_id, action (ADD|REMOVE|TOGGLE)
-  - Output: { success: true, favorite: true|false }
-  - Side effect: inserts/deletes favorites and creates audit_event
+Response:
 
-Security and privacy
---------------------
-- Responses must never include telegram_id or other private contact details.
-- Authentication should be handled by the WebApp layer (not covered here). n8n webhooks should be protected by a token or checked origin in production.
+```json
+{
+  "items": [
+    {
+      "id": "profile UUID",
+      "name": "Public WOMAN name",
+      "age": 30,
+      "city": "Калининград",
+      "matched_preferences": 2,
+      "considered_preferences": 3,
+      "match_score": 0.6667
+    }
+  ],
+  "total": 42,
+  "limit": 25,
+  "offset": 0
+}
+```
 
-Pagination and limits
----------------------
-- Default limit is 25, max limit is 50. Use offset for paging.
-- Returned payload includes total count for client‑side pagination.
+Rules:
 
-Analytics
----------
-- profile_search_events captures search filters for analytics.
-- profile_views captures view events for engagement metrics.
+- verify the viewer exists and has MAN role;
+- require completed `male_search_context`;
+- return only ACTIVE WOMAN profiles from the normalized city;
+- rank but never filter by optional preferences;
+- default limit 25, maximum 50;
+- log effective considered preference keys in `profile_search_events` without copying private values unnecessarily.
 
+Preferences are managed through a separate settings endpoint/workflow. Empty arrays are normalized to NULL. City changes use the same normalization function and remain non-null.

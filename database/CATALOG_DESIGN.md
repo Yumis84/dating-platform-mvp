@@ -1,49 +1,35 @@
-# Catalog design — Profiles catalog
+# Catalog design
 
-Overview
---------
-The catalog module provides read-only access to public, ACTIVE profiles for browsing by users (primarily men in MVP flows). The catalog is powered by the `profiles` table and supports simple filters and analytics.
+PostgreSQL is the source of truth. The catalog returns public WOMAN profiles only.
 
-Source of truth
----------------
-- profiles (only rows with status = 'ACTIVE' are visible in catalog)
+## Storage
 
-Key concepts
-------------
-- profile_views: records each time a user opens a profile. Used for analytics, rate limiting, and engagement metrics.
-- favorites: allows users to mark profiles as favorite. Enforced unique per (user_id, profile_id).
-- profile_search_events: logs search filters and parameters for analytics and ranking improvements.
+- `male_search_context`: private confirmed MAN name and required normalized city.
+- `male_search_preferences`: optional nullable ranking inputs.
+- `profiles`: WOMAN public profiles only in this product flow.
+- `profile_prices`, `profile_meeting_places`, `profile_photos`: structured WOMAN child records.
+- `profile_search_events`: analytics, never persistent preferences.
 
-Typical scenario (male user)
-----------------------------
-Registration
-↓
-Choose city / filters in WebApp
-↓
-Request list of ACTIVE profiles (WF_05)
-↓
-Show profile card
-↓
-Open profile
-↓
-Record view in profile_views (WF_06)
-↓
-Optionally add to favorites
+## Candidate set
 
-Privacy and exposed fields
--------------------------
-Responses must NOT include:
-- telegram_id
-- internal user IDs beyond profile.id
-- any private PII (contacts, emails, payment info)
+The candidate WHERE clause contains only `ACTIVE`, WOMAN owner, and normalized-city equality. The MAN context must be `COMPLETED`. Optional preferences must not appear as excluding predicates.
 
-Future transition
------------------
-- n8n + PostgreSQL → Telegram WebApp: n8n will serve as a thin backend for the WebApp and Telegram interactions, querying Postgres and returning JSON payloads.
-- Later improvements may include full-text search, ranking, and recommendations (separate modules).
+City is stored twice: display text plus `city_normalized`. The normalization contract is shared by MAN and WOMAN persistence. A future `city_id` may replace the comparison key without redesigning the catalog.
 
-Indexes and performance
------------------------
-- Indexes added for profile_views.profile_id, favorites user/profile, and search events created_at.
-- For production, consider composite indexes for common filter combinations (city + age_range).
+## Ranking
 
+Every configured preference contributes one considered dimension and at most one matched dimension. Equal weights are used in MVP.
+
+```text
+match_score = considered > 0 ? matched / considered : 0
+```
+
+No preference row means all city candidates are returned. See `database/queries/man_catalog_ranking_prototype.sql`.
+
+## Performance
+
+The WOMAN schema draft adds a partial `(city_normalized, created_at)` index for ACTIVE profiles. Child-table indexes support price and meeting-place existence checks. Validate query plans on staging before production approval.
+
+## Privacy
+
+Catalog responses expose profile IDs and public content only. MAN name/preferences, Telegram identifiers, owner user IDs, audit data, and moderation internals are not returned.

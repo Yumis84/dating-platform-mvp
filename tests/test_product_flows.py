@@ -1,0 +1,120 @@
+import json
+import re
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOWS = {
+    "wf01": ROOT / "n8n/workflows/registration/WF_01_USER_REGISTRATION_MAN_WOMAN_DEV.json",
+    "wf03": ROOT / "n8n/workflows/profile/WF_03_AI_PROFILE_AGENT.json",
+    "wf05": ROOT / "n8n/workflows/catalog/WF_05_PROFILE_CATALOG_RANKING_DEV.json",
+}
+
+
+def load_workflow(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def normalized_score(matches):
+    considered = sum(1 for configured, _matched in matches if configured)
+    matched = sum(1 for configured, is_match in matches if configured and is_match)
+    return matched, considered, 0 if considered == 0 else matched / considered
+
+
+def normalize_city(value):
+    return re.sub(r"\s+", " ", value.strip().lower().replace("ё", "е"))
+
+
+class WorkflowStaticTests(unittest.TestCase):
+    def test_dev_workflows_are_valid_inactive_json(self):
+        for name, path in WORKFLOWS.items():
+            with self.subTest(name=name):
+                workflow = load_workflow(path)
+                self.assertFalse(workflow["active"])
+                self.assertTrue(workflow.get("meta", {}).get("devOnly"))
+
+    def test_node_names_ids_references_and_connections(self):
+        reference_pattern = re.compile(r"\$\((?:'([^']+)'|\"([^\"]+)\")\)")
+        for name, path in WORKFLOWS.items():
+            with self.subTest(name=name):
+                workflow = load_workflow(path)
+                names = [node["name"] for node in workflow["nodes"]]
+                ids = [node["id"] for node in workflow["nodes"]]
+                self.assertEqual(len(names), len(set(names)))
+                self.assertEqual(len(ids), len(set(ids)))
+                known = set(names)
+                for node in workflow["nodes"]:
+                    payload = json.dumps(node.get("parameters", {}), ensure_ascii=False)
+                    for match in reference_pattern.finditer(payload):
+                        reference = match.group(1) or match.group(2)
+                        self.assertIn(reference, known, f"{node['name']} -> {reference}")
+                for source, streams in workflow.get("connections", {}).items():
+                    self.assertIn(source, known)
+                    for outputs in streams.values():
+                        for branch in outputs:
+                            for edge in branch:
+                                self.assertIn(edge["node"], known)
+
+    def test_postgres_nodes_use_positional_parameters(self):
+        for name, path in WORKFLOWS.items():
+            workflow = load_workflow(path)
+            for node in workflow["nodes"]:
+                if node["type"] != "n8n-nodes-base.postgres":
+                    continue
+                query = node["parameters"].get("query", "")
+                with self.subTest(workflow=name, node=node["name"]):
+                    self.assertNotIn("{{", query)
+                    self.assertRegex(query, r"\$[1-9]")
+
+    def test_woman_flow_uses_tz02_fields_and_real_ai_call(self):
+        raw = WORKFLOWS["wf03"].read_text(encoding="utf-8")
+        for field in (
+            "name", "age", "city", "district", "height_cm", "weight_kg",
+            "breast_size", "description", "profile_prices", "profile_meeting_places",
+        ):
+            self.assertIn(field, raw)
+        for obsolete in ("communication_style", "hobbies", "education"):
+            self.assertNotIn(obsolete, raw)
+        workflow = load_workflow(WORKFLOWS["wf03"])
+        self.assertTrue(any(node["name"] == "DeepSeek Structured Extraction" for node in workflow["nodes"]))
+
+    def test_man_flow_has_confirmation_and_no_generic_questionnaire(self):
+        raw = WORKFLOWS["wf01"].read_text(encoding="utf-8")
+        for expected in ("man_name:keep", "man_name:change", "male_search_context", "normalize_city_name"):
+            self.assertIn(expected, raw)
+        for obsolete in ("communication_style", "hobbies", "education"):
+            self.assertNotIn(obsolete, raw)
+
+
+class SchemaAndRankingTests(unittest.TestCase):
+    def test_city_normalization_contract(self):
+        self.assertEqual(normalize_city("  Орёл  "), "орел")
+        self.assertEqual(normalize_city("Нижний   Новгород"), "нижний новгород")
+
+    def test_woman_and_man_migration_contracts(self):
+        woman = (ROOT / "database/migrations/009_woman_profile_tz02_schema.sql").read_text(encoding="utf-8")
+        man = (ROOT / "database/migrations/010_man_search_context_preferences_schema.sql").read_text(encoding="utf-8")
+        for token in ("city_normalized", "district", "height_cm", "weight_kg", "breast_size", "profile_prices", "profile_meeting_places"):
+            self.assertIn(token, woman)
+        for token in ("male_search_context", "male_search_preferences", "onboarding_status", "TELEGRAM_CONFIRMED"):
+            self.assertIn(token, man)
+
+    def test_ranking_candidate_where_has_only_product_hard_filters(self):
+        sql = (ROOT / "database/queries/man_catalog_ranking_prototype.sql").read_text(encoding="utf-8")
+        candidate_where = sql.split("candidates AS (", 1)[1].split("),\nscored AS", 1)[0]
+        self.assertIn("p.status = 'ACTIVE'", candidate_where)
+        self.assertIn("lower(owner.role) = 'woman'", candidate_where)
+        self.assertIn("p.city_normalized = viewer.city_normalized", candidate_where)
+        for optional in ("age_from", "districts", "height_from", "weight_from", "breast_size_from", "price_from", "meeting_place_types"):
+            self.assertNotIn(optional, candidate_where)
+
+    def test_normalized_score_ignores_unconfigured_preferences(self):
+        self.assertEqual(normalized_score([]), (0, 0, 0))
+        self.assertEqual(normalized_score([(True, True), (True, True)]), (2, 2, 1))
+        self.assertEqual(normalized_score([(True, True), (True, False), (False, False)]), (1, 2, 0.5))
+        self.assertEqual(normalized_score([(True, True), (False, False), (False, True)]), (1, 1, 1))
+
+
+if __name__ == "__main__":
+    unittest.main()

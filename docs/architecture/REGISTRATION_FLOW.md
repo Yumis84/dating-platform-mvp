@@ -1,22 +1,24 @@
-# Registration flow (architecture)
+# Registration and role routing
 
-Sequence diagram (high level):
+```text
+Telegram /start
+-> find or create users + telegram_accounts
+-> select role
+-> persist role + audit
+   -> MAN: resolve/confirm name -> city -> catalog choice
+   -> WOMAN: create/resume DRAFT profile session -> WF_03
+```
 
-Telegram Client (user)
-        ↓
-Telegram Bot (receives /start) —> n8n Telegram Trigger
-        ↓
-n8n workflow:
-  - Extract user info (telegram_id, username, first_name, last_name)
-  - Query PostgreSQL (users) to check existing user
-  - If exists: update last_login_at, create audit event
-  - If new: insert into users, telegram_accounts, audit_events
-        ↓
-PostgreSQL (users, telegram_accounts, audit_events)
-        ↓
-n8n -> Telegram Bot: send welcome message with role selection buttons
+## MAN name
 
-Notes:
-- Telegram is the primary entrypoint (Telegram-first architecture).
-- n8n acts as the backend/orchestrator for the registration flow in the MVP.
-- PostgreSQL stores minimal user info and audit trail; no sensitive PII is collected at this stage.
+Telegram `first_name` is only a suggestion. If present, show `Оставить` / `Изменить`. Persist the explicitly confirmed or manually entered value in `male_search_context`.
+
+## MAN completion
+
+City is normalized at write time. After city, display `Настроить предпочтения` / `Смотреть анкеты`. Preferences are never required.
+
+## Separation
+
+WF_01 owns identity, role routing, and MAN onboarding. WF_03 is WOMAN-only. No MAN public `profiles` row or `profile_ai_sessions` row is created.
+
+Credentials remain in n8n Credentials. Telegram identifiers remain in `telegram_accounts`.

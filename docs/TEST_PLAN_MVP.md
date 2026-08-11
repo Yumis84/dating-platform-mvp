@@ -1,5 +1,7 @@
 # TEST_PLAN_MVP
 
+> Profile-flow notice (2026-08-11): legacy generic WF_02/WF_03 scenarios in this historical plan are superseded by `docs/TEST_PLAN_MAN_WOMAN_ONBOARDING.md`. Do not use the old `interests/purpose/hobbies/job/education/communication_style` questionnaire or nullable orphan-photo expectations.
+
 Дата: 2026-08-07
 Автор: Copilot (manual test plan)
 

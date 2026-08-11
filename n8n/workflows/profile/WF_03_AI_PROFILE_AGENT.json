@@ -1,68 +1,286 @@
 {
-  "name": "WF_03_AI_PROFILE_AGENT",
+  "name": "WF_03_AI_PROFILE_AGENT_WOMAN_DEV",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
   "nodes": [
     {
-      "parameters": {"httpMethod":"POST","path":"ai-profile","responseMode":"onReceived","options":{}},
-      "name":"Webhook Trigger","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[250,250],"credentials":{}
+      "id": "wf03-trigger",
+      "name": "WOMAN Profile Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dev-woman-profile",
+        "responseMode": "responseNode",
+        "options": {}
+      }
     },
     {
-      "parameters":{"values":{"string":[{"name":"user_id","value":"={{ $json[\"body\"] && $json[\"body\"].user_id ? $json.body.user_id : '' }}"},{"name":"session_id","value":"={{ $json[\"body\"] && $json[\"body\"].session_id ? $json.body.session_id : '' }}"},{"name":"user_answer","value":"={{ $json[\"body\"] && $json[\"body\"].user_answer ? $json.body.user_answer : '' }}"},{"name":"photo_file_id","value":"={{ $json[\"body\"] && $json[\"body\"].photo_file_id ? $json.body.photo_file_id : '' }}"}]},"options":{}},
-      "name":"Extract input","type":"n8n-nodes-base.set","typeVersion":1,"position":[450,250]
+      "id": "wf03-normalize",
+      "name": "Normalize WOMAN Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nreturn [{json:{user_id:String(body.user_id||''),session_id:String(body.session_id||''),text:String(body.text||'').trim(),photo_file_id:String(body.photo_file_id||''),message_id:String(body.message_id||'')}}];"
+      }
     },
     {
-      "parameters":{"operation":"executeQuery","query":"-- If session_id provided, try to load it; otherwise load last IN_PROGRESS session for user\nSELECT id, user_id, profile_id, current_step, ai_context, status FROM profile_ai_sessions WHERE id = '{{ $json[\"session_id\"] }}' LIMIT 1;"},
-      "name":"Load session by id","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[650,120],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+      "id": "wf03-session",
+      "name": "Load WOMAN Draft Session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [440, 300],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH chosen AS (\n  SELECT s.id, s.user_id, s.profile_id\n  FROM profile_ai_sessions s\n  JOIN users u ON u.id = s.user_id\n  WHERE s.user_id = $1::uuid\n    AND lower(u.role) = 'woman'\n    AND s.status = 'IN_PROGRESS'\n  ORDER BY s.created_at DESC\n  LIMIT 1\n)\nSELECT id::text AS session_id, user_id::text, profile_id::text\nFROM chosen;",
+        "additionalFields": {
+          "queryParams": "user_id"
+        }
+      }
     },
     {
-      "parameters":{"operation":"executeQuery","query":"-- Fallback: find latest IN_PROGRESS session for user_id\nSELECT id, user_id, profile_id, current_step, ai_context, status FROM profile_ai_sessions WHERE user_id = '{{ $json[\"user_id\"] }}' AND status = 'IN_PROGRESS' ORDER BY created_at DESC LIMIT 1;"},
-      "name":"Find active session","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[650,340],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+      "id": "wf03-is-photo",
+      "name": "Is Photo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 300],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$('Normalize WOMAN Input').item.json.photo_file_id}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      }
     },
     {
-      "parameters":{"operation":"executeQuery","query":"-- Create a new session if none found\nINSERT INTO profile_ai_sessions (id, user_id, profile_id, current_step, ai_context, status, created_at, updated_at)\nVALUES (uuid_generate_v4(), '{{ $json[\"user_id\"] }}', NULL, 0, '{}'::jsonb, 'IN_PROGRESS', now(), now()) RETURNING id, current_step;"},
-      "name":"Create session","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[850,230],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+      "id": "wf03-photo",
+      "name": "Save WOMAN Photo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [880, 180],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO profile_photos (profile_id, telegram_file_id, position)\nSELECT $1::uuid, $2::text, COALESCE(MAX(position), -1) + 1\nFROM profile_photos\nWHERE profile_id = $1::uuid\nON CONFLICT DO NOTHING\nRETURNING id;",
+        "additionalFields": {
+          "queryParams": "profile_id,photo_file_id"
+        }
+      }
     },
     {
-      "parameters":{"functionCode":"// Decide which session to use: Load session by id result first, else active session result, else created session\nconst byId = $node['Load session by id'].json[0];\nconst active = $node['Find active session'].json[0];\nconst created = $node['Create session'].json[0];\nlet session = null;\nif(byId && byId.id) session = byId;\nelse if(active && active.id) session = active;\nelse session = created;\nreturn [{ json: { session_id: session.id, current_step: session.current_step, ai_context: session.ai_context || {} } }];"},
-      "name":"Resolve session","type":"n8n-nodes-base.function","typeVersion":1,"position":[1050,230]
+      "id": "wf03-ai",
+      "name": "DeepSeek Structured Extraction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 420],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DEEPSEEK_API_URL}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.DEEPSEEK_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{JSON.stringify({model:$env.DEEPSEEK_MODEL||'deepseek-chat',response_format:{type:'json_object'},messages:[{role:'system',content:'Extract only explicitly stated WOMAN profile data. Allowed scalar keys: name, age, city, district, height_cm, weight_kg, breast_size, description. Also return prices[] and meeting_places[]. Do not infer. Ambiguous breast size must produce clarification. Return strict JSON: {fields:{},prices:[],meeting_places:[],clarification:null}.'},{role:'user',content:$('Normalize WOMAN Input').item.json.text}]})}}",
+        "options": {}
+      }
     },
     {
-      "parameters":{"values":{"string":[{"name":"incoming_answer","value":"={{$json[\"user_answer\"]}}"},{"name":"photo_file_id","value":"={{$json[\"photo_file_id\"]}}"}]},"options":{}},
-      "name":"Prepare answer","type":"n8n-nodes-base.set","typeVersion":1,"position":[1250,230]
+      "id": "wf03-validate",
+      "name": "Validate AI Extraction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 420],
+      "parameters": {
+        "jsCode": "const raw=$json.choices?.[0]?.message?.content ?? $json;\nconst out=typeof raw==='string'?JSON.parse(raw):raw;\nconst allowed=new Set(['name','age','city','district','height_cm','weight_kg','breast_size','description']);\nconst fields={}; for(const [k,v] of Object.entries(out.fields||{})){if(allowed.has(k)&&v!==null&&v!=='') fields[k]=v;}\nif(fields.age!==undefined&&(Number(fields.age)<18||Number(fields.age)>100)) throw new Error('Invalid age');\nif(fields.height_cm!==undefined&&(Number(fields.height_cm)<100||Number(fields.height_cm)>250)) throw new Error('Invalid height');\nif(fields.weight_kg!==undefined&&(Number(fields.weight_kg)<30||Number(fields.weight_kg)>300)) throw new Error('Invalid weight');\nif(fields.breast_size!==undefined&&(Number(fields.breast_size)<0||Number(fields.breast_size)>20)) throw new Error('Invalid breast size');\nconst prices=(Array.isArray(out.prices)?out.prices:[]).map((p)=>{const amount=Number(p.amount);if(!String(p.service_name||'').trim()||!Number.isFinite(amount)||amount<0) throw new Error('Invalid price');const currency=String(p.currency||'RUB').toUpperCase();if(!/^[A-Z]{3}$/.test(currency)) throw new Error('Invalid currency');return {service_name:String(p.service_name).trim(),amount,currency,duration_minutes:p.duration_minutes==null?null:Number(p.duration_minutes),description:p.description==null?null:String(p.description)};});\nconst placeTypes=new Set(['HER_PLACE','HIS_PLACE','HOTEL','PUBLIC_PLACE','OTHER']);const meeting_places=(Array.isArray(out.meeting_places)?out.meeting_places:[]).map((p)=>{const type=String(p.place_type||'').toUpperCase(),label=String(p.label||'').trim();if(!placeTypes.has(type)||!label) throw new Error('Invalid meeting place');return {place_type:type,label,district:p.district==null?null:String(p.district),description:p.description==null?null:String(p.description)};});\nreturn [{json:{payload_json:JSON.stringify({fields,prices,meeting_places,clarification:out.clarification||null}),session_id:$('Load WOMAN Draft Session').item.json.session_id,profile_id:$('Load WOMAN Draft Session').item.json.profile_id}}];"
+      }
     },
     {
-      "parameters":{"operation":"executeQuery","query":"-- Map steps to field names in the session.ai_context and save the incoming answer into ai_context; increment current_step\nWITH s AS (SELECT id, current_step, ai_context FROM profile_ai_sessions WHERE id = '{{ $node["Resolve session"].json[0].session_id }}' FOR UPDATE)\nUPDATE profile_ai_sessions p SET ai_context = (COALESCE(p.ai_context, '{}'::jsonb) || jsonb_build_object(CASE (SELECT current_step FROM s) WHEN 0 THEN 'name' WHEN 1 THEN 'age' WHEN 2 THEN 'city' WHEN 3 THEN 'description' WHEN 4 THEN 'interests' WHEN 5 THEN 'purpose' WHEN 6 THEN 'hobbies' WHEN 7 THEN 'job' WHEN 8 THEN 'education' WHEN 9 THEN 'communication_style' ELSE 'extra' END, to_jsonb('{{ $json["incoming_answer"] }}'))), current_step = (SELECT current_step FROM s) + 1, updated_at = now() WHERE p.id = '{{ $node["Resolve session"].json[0].session_id }}' RETURNING p.id, p.current_step, p.ai_context;"},
-      "name":"Save answer and advance","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1450,230],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+      "id": "wf03-persist",
+      "name": "Persist WOMAN Extraction",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1320, 420],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (SELECT $1::uuid profile_id, $2::uuid session_id, $3::jsonb payload),\nupdated_profile AS (\n UPDATE profiles p SET\n  name=COALESCE(input.payload->'fields'->>'name',p.name),\n  age=COALESCE((input.payload->'fields'->>'age')::int,p.age),\n  city=COALESCE(input.payload->'fields'->>'city',p.city),\n  city_normalized=COALESCE(normalize_city_name(input.payload->'fields'->>'city'),p.city_normalized),\n  district=COALESCE(input.payload->'fields'->>'district',p.district),\n  height_cm=COALESCE((input.payload->'fields'->>'height_cm')::smallint,p.height_cm),\n  weight_kg=COALESCE((input.payload->'fields'->>'weight_kg')::numeric,p.weight_kg),\n  breast_size=COALESCE((input.payload->'fields'->>'breast_size')::numeric,p.breast_size),\n  description=COALESCE(input.payload->'fields'->>'description',p.description), updated_at=now()\n FROM input WHERE p.id=input.profile_id RETURNING p.id\n),\nprice_rows AS (\n INSERT INTO profile_prices(profile_id,service_name,amount,currency,duration_minutes,description,position)\n SELECT input.profile_id,x.service_name,x.amount,COALESCE(x.currency,'RUB'),x.duration_minutes,x.description,x.ord-1\n FROM input CROSS JOIN LATERAL jsonb_to_recordset(COALESCE(input.payload->'prices','[]'::jsonb)) WITH ORDINALITY AS x(service_name text,amount numeric,currency char(3),duration_minutes int,description text,ord bigint)\n WHERE NULLIF(btrim(x.service_name),'') IS NOT NULL AND x.amount>=0\n ON CONFLICT(profile_id,position) DO UPDATE SET service_name=EXCLUDED.service_name,amount=EXCLUDED.amount,currency=EXCLUDED.currency,duration_minutes=EXCLUDED.duration_minutes,description=EXCLUDED.description,updated_at=now() RETURNING id\n),\nplace_rows AS (\n INSERT INTO profile_meeting_places(profile_id,place_type,label,district,description,position)\n SELECT input.profile_id,x.place_type,x.label,x.district,x.description,x.ord-1\n FROM input CROSS JOIN LATERAL jsonb_to_recordset(COALESCE(input.payload->'meeting_places','[]'::jsonb)) WITH ORDINALITY AS x(place_type text,label text,district text,description text,ord bigint)\n WHERE x.place_type IN ('HER_PLACE','HIS_PLACE','HOTEL','PUBLIC_PLACE','OTHER') AND NULLIF(btrim(x.label),'') IS NOT NULL\n ON CONFLICT(profile_id,position) DO UPDATE SET place_type=EXCLUDED.place_type,label=EXCLUDED.label,district=EXCLUDED.district,description=EXCLUDED.description,updated_at=now() RETURNING id\n),\ncontext AS (\n UPDATE profile_ai_sessions s SET ai_context=COALESCE(s.ai_context,'{}'::jsonb)||jsonb_build_object('last_extraction',(SELECT payload FROM input)),updated_at=now()\n FROM input WHERE s.id=input.session_id RETURNING s.id\n)\nSELECT (SELECT id::text FROM updated_profile) profile_id,(SELECT id::text FROM context) session_id,(SELECT count(*) FROM price_rows) prices_saved,(SELECT count(*) FROM place_rows) places_saved;",
+        "additionalFields": {
+          "queryParams": "profile_id,session_id,payload_json"
+        }
+      }
     },
     {
-      "parameters":{"operation":"executeQuery","query":"-- If photo_file_id present, store metadata in profile_photos linked to existing profile (if any) or keep for later; we store with profile_id NULL until profile exists\nINSERT INTO profile_photos (id, profile_id, telegram_file_id, position, created_at) VALUES (uuid_generate_v4(), NULL, '{{ $json[\"photo_file_id\"] }}', 0, now()) RETURNING id;"},
-      "name":"Save photo metadata (optional)","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[1450,420],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+      "id": "wf03-completeness",
+      "name": "Load WOMAN Completeness",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1540, 300],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT p.id::text profile_id,s.id::text session_id,p.name,p.age,p.city,p.city_normalized,p.district,p.height_cm,p.weight_kg,p.breast_size,p.description,\n (SELECT count(*) FROM profile_photos x WHERE x.profile_id=p.id) photo_count,\n (SELECT count(*) FROM profile_prices x WHERE x.profile_id=p.id AND x.is_active) price_count,\n (SELECT count(*) FROM profile_meeting_places x WHERE x.profile_id=p.id AND x.is_active) meeting_place_count\nFROM profile_ai_sessions s JOIN profiles p ON p.id=s.profile_id\nWHERE s.id=$1::uuid AND s.status='IN_PROGRESS';",
+        "additionalFields": {
+          "queryParams": "session_id"
+        }
+      }
     },
     {
-      "parameters":{"functionCode":"// Determine next question text based on updated current_step\nconst step = $node['Save answer and advance'].json[0] ? $node['Save answer and advance'].json[0].current_step : $node['Resolve session'].json[0].current_step;\nconst questions = [\n  'What is your name?',\n  'How old are you?',\n  'Which city do you live in?',\n  'Tell us about yourself (short description)',\n  'List your interests (comma separated)',\n  'What is your goal on this platform (e.g. dating, friends)?',\n  'Optional: any hobbies?',\n  'Optional: what is your job?',\n  'Optional: education?',\n  'Optional: preferred communication style?'
-];\nconst next = questions[step] || null;\nreturn [{ json: { next_question: next, current_step: step } }];"},
-      "name":"Prepare next question","type":"n8n-nodes-base.function","typeVersion":1,"position":[1650,230]
+      "id": "wf03-next",
+      "name": "Determine Next WOMAN Block",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 300],
+      "parameters": {
+        "jsCode": "const x=$json; const checks=[['name',x.name],['age',x.age],['city',x.city_normalized],['district',x.district],['height',x.height_cm],['weight',x.weight_kg],['breast_size',x.breast_size],['description',x.description],['photos',Number(x.photo_count)>0],['prices',Number(x.price_count)>0],['meeting_places',Number(x.meeting_place_count)>0]]; const i=checks.findIndex(([,v])=>v===null||v===undefined||v===''||v===false); const questions={name:'Как тебя зовут?',age:'Сколько тебе лет?',city:'В каком городе ты живёшь?',district:'Какой район?',height:'Какой у тебя рост в сантиметрах?',weight:'Какой вес в килограммах?',breast_size:'Укажи числовой размер груди.',description:'Расскажи о себе.',photos:'Добавь хотя бы одно фото.',prices:'Укажи цены.',meeting_places:'Укажи места встречи.'}; return [{json:{...x,complete:i<0,current_step:i<0?checks.length:i,next_block:i<0?null:checks[i][0],question:i<0?null:questions[checks[i][0]]}}];"
+      }
     },
     {
-      "parameters":{"values":{"string":[{"name":"is_complete","value":"={{ $node['Prepare next question'].json[0].next_question === null ? 'true' : 'false' }}"}]},"options":{}},
-      "name":"Check completion","type":"n8n-nodes-base.set","typeVersion":1,"position":[1850,230]
+      "id": "wf03-cursor",
+      "name": "Save Derived WOMAN Cursor",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1980, 300],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE profile_ai_sessions SET current_step=$2::int,updated_at=now() WHERE id=$1::uuid AND status='IN_PROGRESS' RETURNING id::text, $3::boolean AS complete;",
+        "additionalFields": {
+          "queryParams": "session_id,current_step,complete"
+        }
+      }
     },
     {
-      "parameters":{"operation":"executeQuery","query":"-- Finalize profile: create profiles row from ai_context and mark session completed; only if not already created\nWITH s as (SELECT id, ai_context FROM profile_ai_sessions WHERE id = '{{ $node["Resolve session"].json[0].session_id }}')\n, p AS (INSERT INTO profiles (id, user_id, status, name, age, city, description, interests, preferences, created_at, updated_at)\nSELECT uuid_generate_v4(), (SELECT user_id FROM profile_ai_sessions WHERE id = '{{ $node["Resolve session"].json[0].session_id }}'), 'PENDING_MODERATION',\n  (s.ai_context->> 'name'),\n  (s.ai_context->> 'age')::int,\n  (s.ai_context->> 'city'),\n  (s.ai_context->> 'description'),\n  (CASE WHEN s.ai_context ? 'interests' THEN (s.ai_context->'interests') ELSE to_jsonb(array[]::text[]) END),\n  '{}'::jsonb, now(), now()\nFROM s\nWHERE NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = (SELECT user_id FROM profile_ai_sessions WHERE id = '{{ $node["Resolve session"].json[0].session_id }}'))\nRETURNING id)\nUPDATE profile_ai_sessions SET profile_id = COALESCE((SELECT id FROM p), profile_id), status = 'COMPLETED', updated_at = now() WHERE id = '{{ $node["Resolve session"].json[0].session_id }}' RETURNING profile_id;"},
-      "name":"Finalize profile (if complete)","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[2050,230],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+      "id": "wf03-is-complete",
+      "name": "WOMAN Profile Complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2200, 300],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$('Determine Next WOMAN Block').item.json.complete}}",
+              "value2": true
+            }
+          ]
+        }
+      }
     },
     {
-      "parameters":{"operation":"executeQuery","query":"-- Create audit_event for profile_created if profile was created\nINSERT INTO audit_events (user_id, event_type, event_data)\nSELECT (SELECT user_id FROM profile_ai_sessions WHERE id = '{{ $node["Resolve session"].json[0].session_id }}'), 'profile_created', jsonb_build_object('profile_id', (SELECT profile_id FROM profile_ai_sessions WHERE id = '{{ $node["Resolve session"].json[0].session_id }}'))\nWHERE (SELECT profile_id FROM profile_ai_sessions WHERE id = '{{ $node["Resolve session"].json[0].session_id }}') IS NOT NULL;"},
-      "name":"Create profile audit_event","type":"n8n-nodes-base.postgres","typeVersion":1,"position":[2250,230],"credentials":{"postgres":{"id":"POSTGRES_PLACEHOLDER","name":"POSTGRES_PLACEHOLDER"}}
+      "id": "wf03-finalize",
+      "name": "Finalize WOMAN Profile",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [2420, 180],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH completed AS (UPDATE profile_ai_sessions SET status='COMPLETED',updated_at=now() WHERE id=$1::uuid AND status='IN_PROGRESS' RETURNING user_id,profile_id),\nprofile AS (UPDATE profiles p SET status='PENDING_MODERATION',updated_at=now() FROM completed c WHERE p.id=c.profile_id RETURNING p.id),\nmoderation AS (INSERT INTO profile_moderation(profile_id,moderator_type,status) SELECT id,'AI','PENDING' FROM profile WHERE NOT EXISTS(SELECT 1 FROM profile_moderation m WHERE m.profile_id=profile.id AND m.status='PENDING') RETURNING id),\naudit AS (INSERT INTO audit_events(user_id,event_type,event_data) SELECT c.user_id,'profile_created',jsonb_build_object('profile_id',c.profile_id) FROM completed c WHERE NOT EXISTS(SELECT 1 FROM audit_events a WHERE a.event_type='profile_created' AND a.event_data->>'profile_id'=c.profile_id::text) RETURNING id)\nSELECT profile.id::text profile_id,'Спасибо! Анкета отправлена на модерацию.' message FROM profile;",
+        "additionalFields": {
+          "queryParams": "session_id"
+        }
+      }
     },
     {
-      "parameters":{"requestMethod":"POST","url":"={{ $env.WF_04_TRIGGER_URL || '' }}","options":{"headers":{"Content-Type":"application/json"}},"bodyParametersUi":{"parameterValues":[{"name":"profile_id","value":"={{ $node['Finalize profile (if complete)'].json[0].profile_id || '' }}"}]},"queryParametersUi":{"parameterValues":[]}},
-      "name":"Trigger WF_04 (moderation)","type":"n8n-nodes-base.httpRequest","typeVersion":1,"position":[2450,230],"credentials":{}
+      "id": "wf03-question",
+      "name": "Prepare WOMAN Question",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2420, 420],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "message",
+              "type": "string",
+              "value": "={{$('Determine Next WOMAN Block').item.json.question}}"
+            }
+          ]
+        }
+      }
     },
-    {"parameters":{"value":"={ next_question: $node['Prepare next question'].json[0].next_question, session_id: $node['Resolve session'].json[0].session_id }","options":{"binaryData":false}},"name":"Prepare response","type":"n8n-nodes-base.set","typeVersion":1,"position":[2650,230]},
-    {"parameters":{"responseCode":200,"responseMode":"lastNode","options":{}},"name":"Respond to Webhook","type":"n8n-nodes-base.webhook","typeVersion":1,"position":[2850,230],"credentials":{}}
+    {
+      "id": "wf03-response",
+      "name": "Respond WOMAN Flow",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [2640, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      }
+    }
   ],
-  "connections":{"Webhook Trigger":{"main":[[{"node":"Extract input","type":"main","index":0}]]},"Extract input":{"main":[[{"node":"Load session by id","type":"main","index":0},{"node":"Find active session","type":"main","index":0},{"node":"Create session","type":"main","index":0}]]},"Load session by id":{"main":[[{"node":"Resolve session","type":"main","index":0}]]},"Find active session":{"main":[[{"node":"Resolve session","type":"main","index":0}]]},"Create session":{"main":[[{"node":"Resolve session","type":"main","index":0}]]},"Resolve session":{"main":[[{"node":"Prepare answer","type":"main","index":0}]]},"Prepare answer":{"main":[[{"node":"Save answer and advance","type":"main","index":0},{"node":"Save photo metadata (optional)","type":"main","index":0}]]},"Save answer and advance":{"main":[[{"node":"Prepare next question","type":"main","index":0},{"node":"Finalize profile (if complete)","type":"main","index":0}]]},"Save photo metadata (optional)":{"main":[[{"node":"Prepare next question","type":"main","index":0}]]},"Prepare next question":{"main":[[{"node":"Check completion","type":"main","index":0}]]},"Check completion":{"main":[[{"node":"Finalize profile (if complete)","type":"main","index":0},{"node":"Prepare response","type":"main","index":0}]]},"Finalize profile (if complete)":{"main":[[{"node":"Create profile audit_event","type":"main","index":0},{"node":"Trigger WF_04 (moderation)","type":"main","index":0},{"node":"Prepare response","type":"main","index":0}]]},"Create profile audit_event":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Trigger WF_04 (moderation)":{"main":[[{"node":"Prepare response","type":"main","index":0}]]},"Prepare response":{"main":[[{"node":"Respond to Webhook","type":"main","index":0}]]}},
-  "active":false,
-  "settings":{},
-  "id":"WF_03_AI_PROFILE_AGENT_0001"
+  "connections": {
+    "WOMAN Profile Webhook": {"main": [[{"node": "Normalize WOMAN Input", "type": "main", "index": 0}]]},
+    "Normalize WOMAN Input": {"main": [[{"node": "Load WOMAN Draft Session", "type": "main", "index": 0}]]},
+    "Load WOMAN Draft Session": {"main": [[{"node": "Is Photo", "type": "main", "index": 0}]]},
+    "Is Photo": {"main": [[{"node": "Save WOMAN Photo", "type": "main", "index": 0}], [{"node": "DeepSeek Structured Extraction", "type": "main", "index": 0}]]},
+    "Save WOMAN Photo": {"main": [[{"node": "Load WOMAN Completeness", "type": "main", "index": 0}]]},
+    "DeepSeek Structured Extraction": {"main": [[{"node": "Validate AI Extraction", "type": "main", "index": 0}]]},
+    "Validate AI Extraction": {"main": [[{"node": "Persist WOMAN Extraction", "type": "main", "index": 0}]]},
+    "Persist WOMAN Extraction": {"main": [[{"node": "Load WOMAN Completeness", "type": "main", "index": 0}]]},
+    "Load WOMAN Completeness": {"main": [[{"node": "Determine Next WOMAN Block", "type": "main", "index": 0}]]},
+    "Determine Next WOMAN Block": {"main": [[{"node": "Save Derived WOMAN Cursor", "type": "main", "index": 0}]]},
+    "Save Derived WOMAN Cursor": {"main": [[{"node": "WOMAN Profile Complete", "type": "main", "index": 0}]]},
+    "WOMAN Profile Complete": {"main": [[{"node": "Finalize WOMAN Profile", "type": "main", "index": 0}], [{"node": "Prepare WOMAN Question", "type": "main", "index": 0}]]},
+    "Finalize WOMAN Profile": {"main": [[{"node": "Respond WOMAN Flow", "type": "main", "index": 0}]]},
+    "Prepare WOMAN Question": {"main": [[{"node": "Respond WOMAN Flow", "type": "main", "index": 0}]]}
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "devOnly": true
+  },
+  "id": "WF_03_AI_PROFILE_AGENT_WOMAN_DEV"
 }
