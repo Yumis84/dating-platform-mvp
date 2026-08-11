@@ -2,7 +2,7 @@
 
 Date: 2026-08-11
 
-Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS + TELEGRAM TRANSPORT PARTIAL PASS + LIVE-TEST UX PATCH VERIFIED. Imported only as separate inactive DEV/test workflows. Not approved for production activation or publish.**
+Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS + TWO TELEGRAM LIVE TESTS + UX PATCH VERIFIED. Imported only as separate inactive DEV/test workflows. Not approved for production activation or publish.**
 
 ## Artifact
 
@@ -12,7 +12,7 @@ Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS + TELEGRAM TR
 - Nodes: 57
 - Connection sources: 44
 - Edges: 57
-- SHA-256: `5a2adca23e0cc61b209f69d4f933aee0da4c22b346c32fc6c3de499a97a9a05b`
+- SHA-256: `14faefa01f223d317456a1e852b1a54ebb1cf5f783300a0e4a2b167440a6c328`
 - Target `meta.instanceId`: `7715b9e43263936ef7d5ead15b70c021d76e29a9bc1abb07d28243b86cc28821`
 
 Three nodes were added to the 54-node source:
@@ -165,6 +165,23 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Updated isolated DB integration execution `4507`: PASS, 35/35 runtime invariants, `cleanup = VERIFIED`, PostgreSQL node error: none
 - New DB coverage verifies registration-audit return semantics, completed-profile text routing, the first allowed `/start`, and an immediately repeated suppressed `/start`
 - No production workflow was edited, activated, unpublished, or published; no migration was created or applied
+
+## Second live Telegram test (57-node patch)
+
+- Test window active version: `3e33ddd5-d99a-4bc6-8f50-15c740f7f806`; the test workflow was unpublished immediately after the transcript was received
+- Webhook executions `4508`-`4537`: 30/30 completed with status `success`
+- The first ten near-simultaneous `/start` updates (`4508`-`4517`) produced exactly one welcome message; nine executions stopped at `Send start response?` with `should_respond = false`
+- The current throttle is a 3-second response window. A longer continuous series can receive another response after three seconds; executions `4530`, `4531`, `4533`, `4535`, and `4537` were allowed, while `4532` and `4534` were suppressed
+- Both role callbacks were accepted: `role:man` (`4518`) followed by `role:woman` (`4519`). The final persisted role was `woman`, and two `role_selected` audit rows were written. Whether role changes should remain possible after the first selection is an unresolved product decision
+- Text executions `4520`-`4529` saved canonical steps 0-9 in order and finalized once. Name, age, city, description, interests, and purpose matched the supplied values; `нет` on steps 6-9 was normalized to JSON `null`
+- Final database state before cleanup: one `PENDING_MODERATION` profile, one linked `COMPLETED` session at step 10, one pending AI moderation row, and zero photos
+- The literal `пропуск` alias and both pending/post-profile photo routes were not exercised in this run
+- Arbitrary post-completion text execution `4536` correctly returned `Анкета уже заполнена. Просмотр анкет пока не реализован.`
+- `/start` still returned the shorter `Анкета уже заполнена.`. Static inspection found that the prior patch updated `values.string[0]` (`current_step`) instead of the named `question_text` entry in `Prepare resume question`
+- The resume mapping was corrected by field name: `current_step` is restored to `={{$json.current_step}}`, while `question_text` now contains the explicit completed-profile fallback. Local graph validation and n8n Workflow SDK validation pass for all 57 nodes
+- Exact-ID cleanup execution `4539`: PASS. Deleted one profile, one session, one moderation row, nine current-test audit rows, and zero photos; residual target rows were zero
+- Cleanup preserved the existing user, Telegram account, and all eight older audit rows. Read-only post-cleanup execution `4540` confirmed zero profiles, sessions, photos, moderation rows, and current-test audit rows
+- Final test workflow state: `active = false`, `activeVersionId = null`. The cleanup helper was restored to an inactive read-only audit query
 
 ## Remaining boundaries
 
