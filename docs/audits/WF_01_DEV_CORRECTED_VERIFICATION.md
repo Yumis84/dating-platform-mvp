@@ -2,22 +2,24 @@
 
 Date: 2026-08-11
 
-Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS + TELEGRAM TRANSPORT PARTIAL PASS. Imported only as a separate inactive DEV workflow. Not approved for production activation or publish.**
+Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS + TELEGRAM TRANSPORT PARTIAL PASS + LIVE-TEST UX PATCH VERIFIED. Imported only as separate inactive DEV/test workflows. Not approved for production activation or publish.**
 
 ## Artifact
 
 - Corrected file: `n8n/workflows/registration/WF_01_USER_REGISTRATION_DEV_CORRECTED_56NODE.json`
+- The filename is retained for branch continuity; the current graph contains 57 nodes after the live-test UX patch
 - Derived from the immutable 54-node DEV snapshot
-- Nodes: 56
-- Connection sources: 43
-- Edges: 56
-- SHA-256: `69e4c9d948f562754bfe5c6a21529ebc56f709a01984fdaa46f1f5f6a8e84792`
+- Nodes: 57
+- Connection sources: 44
+- Edges: 57
+- SHA-256: `5a2adca23e0cc61b209f69d4f933aee0da4c22b346c32fc6c3de499a97a9a05b`
 - Target `meta.instanceId`: `7715b9e43263936ef7d5ead15b70c021d76e29a9bc1abb07d28243b86cc28821`
 
-Two nodes were added to the 54-node source:
+Three nodes were added to the 54-node source:
 
 - `Is text?`
 - `Send fallback (unsupported message)`
+- `Send start response?`
 
 This prevents stickers, voice messages, contacts, locations, and documents from being processed as empty onboarding text answers.
 
@@ -96,10 +98,10 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 ## Verification performed
 
 - JSON parse: PASS
-- Node count: 56
-- Unique node names: 56/56
-- Unique node IDs: 56/56
-- Reachable from `Telegram Trigger`: 56/56
+- Node count: 57
+- Unique node names: 57/57
+- Unique node IDs: 57/57
+- Reachable from `Telegram Trigger`: 57/57
 - Missing connection endpoints: 0
 - Missing named node references: 0
 - Graph cycles: 0
@@ -111,10 +113,10 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Legacy temporary `SELECT 'man'`: absent
 - Legacy `field_value_sql`: absent
 - Destructive SQL/migrations: absent
-- n8n server node-config validation: 56/56 PASS
-- n8n Workflow SDK validation: PASS, 56 nodes, no warnings
-- Draft import target: `eMMEhEMrqFe35F7l` (`WF_01_USER_REGISTRATION_DEV_CORRECTED_56NODE`)
-- Imported draft graph: 56 nodes, 56 edges, 56 unique names/IDs, no missing endpoints/references
+- n8n server update validation: PASS, 57 nodes, no warnings on the Telegram test clone
+- n8n Workflow SDK validation: PASS, 57 nodes, no warnings
+- Draft import target: `eMMEhEMrqFe35F7l` (`WF_01_USER_REGISTRATION_DEV_CORRECTED_57NODE`)
+- Imported draft graph: 57 nodes, 57 edges, 57 unique names/IDs, no missing endpoints/references
 - Imported draft state: `active = false`, `activeVersionId = null`, `triggerCount = 0`
 - Safe pin-data smoke tests: 22/22 PASS (executions `4426`-`4447`)
 - All canonical text-onboarding steps `0..9`: PASS, including validation, optional skip, stale-answer protection, and step-9 finalization routing
@@ -148,18 +150,33 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - The photo route was not exercised in this live test
 - Cleanup execution `4506`: PASS. It deleted only the current run profile, session, moderation row, and two current audit events; the pre-existing user, Telegram account, and eight earlier audit events were preserved
 
+## Live-test UX patch verification
+
+- `пропуск` is now accepted together with `пропустить`, `skip`, `-`, and `нет` for optional steps 6-9; it is normalized to JSON `null` instead of being stored literally
+- `Create audit_event` now always returns the canonical `user_id`, including the idempotent no-insert path, so new and existing users share the same `/start` response gate
+- `Load start session` uses `pg_try_advisory_xact_lock` plus a minimal `start_prompt_sent` row in the existing `audit_events` table; a 3-second per-user window suppresses rapid duplicate responses without adding schema
+- `Send start response?` has an empty false branch, so a suppressed update makes no Telegram API call
+- Completed profiles are represented explicitly by `Load active session` as `status = COMPLETED`, `current_step = 10`, `profile_exists = true`; arbitrary text then replies `Анкета уже заполнена. Просмотр анкет пока не реализован.`
+- Local graph validation: 57 nodes, 57 edges, 57 reachable nodes, 57 unique names and IDs, no missing references, no cycles, no expression/placeholder warnings
+- n8n Workflow SDK validation: PASS, 57 nodes, no warnings
+- Corrected inactive DEV draft: `eMMEhEMrqFe35F7l` (`WF_01_USER_REGISTRATION_DEV_CORRECTED_57NODE`), `active = false`, `activeVersionId = null`
+- Inactive Telegram test clone: `cXeonlxpKEG9FBzt` (`WF_01_USER_REGISTRATION_TELEGRAM_TEST_57NODE`), `active = false`, `activeVersionId = null`
+- Both saved graphs contain the response gate and exact connections `Create audit_event -> Load start session -> Send start response? -> Has start session?`; the gate's false output is intentionally unconnected
+- Updated isolated DB integration execution `4507`: PASS, 35/35 runtime invariants, `cleanup = VERIFIED`, PostgreSQL node error: none
+- New DB coverage verifies registration-audit return semantics, completed-profile text routing, the first allowed `/start`, and an immediately repeated suppressed `/start`
+- No production workflow was edited, activated, unpublished, or published; no migration was created or applied
+
 ## Remaining boundaries
 
 - This is still a canvas snapshot (`nodes/connections/pinData/meta`), not a full workflow export with workflow ID, active state, settings, and draft/active version IDs.
 - All 18 SQL statements were parsed and type-checked by the confirmed test PostgreSQL database through `PREPARE`; no prepared statement was executed, so no `INSERT`, `UPDATE`, or `DELETE` took effect.
-- A separate isolated integration harness then executed the corrected registration/onboarding/finalization SQL against the confirmed test database. Its 33 assertions passed and its final cleanup assertion verified that no synthetic user, Telegram account, profile, session, audit, photo, or moderation rows remained.
+- A separate isolated integration harness then executed the corrected registration/onboarding/finalization SQL against the confirmed test database. Its latest 35 assertions passed and its final cleanup assertion verified that no synthetic user, Telegram account, profile, session, audit, photo, or moderation rows remained.
 - Advisory locks protect executions using this corrected workflow. Absolute cross-system guarantees still require future additive unique indexes after a duplicate-data audit; no migration was created or applied here.
 - Existing duplicate profiles/sessions/photos, if already present, are not deleted or reconciled.
 - The workflow queues `profile_moderation`; it does not call WF_04 directly. A separate worker/webhook contract is still required if no moderation worker polls this table.
 - No photo-count policy was added because no product limit was confirmed.
-- The corrected JSON was compiled through the n8n Workflow SDK and imported as a separate inactive DEV workflow. It was exercised only with pinned external nodes, and it was not activated or published.
+- The corrected JSON was compiled through the n8n Workflow SDK and saved as separate inactive 57-node DEV/test workflows. The UX patch was verified by isolated database execution; neither workflow was activated or published after the patch.
 
 ## Safe next step
 
-Patch the transport UX before the next live test: normalize optional skip aliases (`пропуск`, `пропустить`, `-`), suppress repeated `/start` responses within a short per-chat window, and make the post-completion fallback explicitly distinguish unsupported commands from onboarding state. Then repeat the test with one pending photo and one post-profile photo. Production publish still requires a separate explicit approval.
-
+With separate approval, temporarily activate only `WF_01_USER_REGISTRATION_TELEGRAM_TEST_57NODE` and repeat the live test with rapid `/start`, the `пропуск` alias, one pending photo, and one post-profile photo. Production publish still requires a separate explicit approval.
