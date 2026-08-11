@@ -157,7 +157,7 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 
 - `пропуск` is now accepted together with `пропустить`, `skip`, `-`, and `нет` for optional steps 6-9; it is normalized to JSON `null` instead of being stored literally
 - `Create audit_event` now always returns the canonical `user_id`, including the idempotent no-insert path, so new and existing users share the same `/start` response gate
-- `Load start session` uses `pg_try_advisory_xact_lock` plus a minimal `start_prompt_sent` row in the existing `audit_events` table; a 3-second per-user window suppresses rapid duplicate responses without adding schema
+- The 57-node version used `pg_try_advisory_xact_lock` plus a minimal `start_prompt_sent` row in the existing `audit_events` table; its 3-second per-user window suppressed rapid duplicate responses without adding schema
 - `Send start response?` has an empty false branch, so a suppressed update makes no Telegram API call
 - Completed profiles are represented explicitly by `Load active session` as `status = COMPLETED`, `current_step = 10`, `profile_exists = true`; arbitrary text then replies `Анкета уже заполнена. Просмотр анкет пока не реализован.`
 - Local graph validation: 57 nodes, 57 edges, 57 reachable nodes, 57 unique names and IDs, no missing references, no cycles, no expression/placeholder warnings
@@ -174,8 +174,8 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Test window active version: `3e33ddd5-d99a-4bc6-8f50-15c740f7f806`; the test workflow was unpublished immediately after the transcript was received
 - Webhook executions `4508`-`4537`: 30/30 completed with status `success`
 - The first ten near-simultaneous `/start` updates (`4508`-`4517`) produced exactly one welcome message; nine executions stopped at `Send start response?` with `should_respond = false`
-- The current throttle is a 3-second response window. A longer continuous series can receive another response after three seconds; executions `4530`, `4531`, `4533`, `4535`, and `4537` were allowed, while `4532` and `4534` were suppressed
-- Both role callbacks were accepted: `role:man` (`4518`) followed by `role:woman` (`4519`). The final persisted role was `woman`, and two `role_selected` audit rows were written. Whether role changes should remain possible after the first selection is an unresolved product decision
+- In that 57-node test, the throttle was a 3-second response window. A longer continuous series could receive another response after three seconds; executions `4530`, `4531`, `4533`, `4535`, and `4537` were allowed, while `4532` and `4534` were suppressed
+- Both role callbacks were accepted in that version: `role:man` (`4518`) followed by `role:woman` (`4519`). The final persisted role was `woman`, and two `role_selected` audit rows were written. This product decision was resolved by the later 59-node first-role-wins patch documented below
 - Text executions `4520`-`4529` saved canonical steps 0-9 in order and finalized once. Name, age, city, description, interests, and purpose matched the supplied values; `нет` on steps 6-9 was normalized to JSON `null`
 - Final database state before cleanup: one `PENDING_MODERATION` profile, one linked `COMPLETED` session at step 10, one pending AI moderation row, and zero photos
 - The literal `пропуск` alias and both pending/post-profile photo routes were not exercised in this run
