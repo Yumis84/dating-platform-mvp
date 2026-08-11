@@ -204,6 +204,24 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - New DB coverage proves that the first role is accepted with a new session, the second different role is rejected while the first role/session remain unchanged, two rapid `/start` attempts are both logged, and exactly one has `responded = true`.
 - No production workflow was edited, activated, unpublished, or published. The 59-node DEV/test workflows were not activated or published.
 
+## Third live Telegram test (59-node patch, partial coverage)
+
+- Temporary test active version: `9a194021-9ff6-4cc4-9725-4927ec5f9b1d`. Only `cXeonlxpKEG9FBzt` (`WF_01_USER_REGISTRATION_TELEGRAM_TEST_59NODE`) was published; the DEV and production workflows were not activated or edited.
+- Webhook executions `4551`-`4566`: 16/16 completed with status `success`; no node errors occurred.
+- Execution `4551` handled `/start` and sent the role keyboard. Execution `4552` accepted `role:woman`, atomically created the onboarding session, wrote one role audit, and sent the first question.
+- Executions `4553`-`4562` saved canonical text steps 0-9 in order and finalized exactly once. The final profile was `PENDING_MODERATION`; the linked session was `COMPLETED` at `current_step = 10`; one pending AI moderation row existed.
+- Persisted fields matched the transcript: name `Снежана`, age `22`, city `Сызрань`, description `О себе`, interests `["Интересы"]`, purpose `Времяпровождение`, and job `Работаю`.
+- Case-insensitive `Нет` at steps 6 and 8 and `Пропуск` at step 9 were normalized to JSON `null`; no literal skip value was materialized into `profiles.preferences`.
+- Completed-profile `/start` execution `4563` had `should_respond = true` and returned the full fallback `Анкета уже заполнена. Просмотр анкет пока не реализован.`
+- Rapid executions `4564`, `4565`, and `4566` all had `should_respond = false` and stopped at `Send start response?`, producing no Telegram API call. Execution `4566` occurred more than 10 seconds after `4563` but less than 10 seconds after `4565`, which directly verifies that the window slides from the latest attempt.
+- A second role callback was not sent in this live run, so the first-role-wins rejection branch remains covered by static analysis and the 37-check DB harness, not by Telegram transport.
+- No photo was sent, so pending-photo materialization and post-profile photo requeue remain covered by static analysis and the DB harness, not by this Telegram run.
+- The after-10-seconds-of-silence response was not exercised in this run.
+- Read-only state execution `4567` confirmed the exact profile/session/moderation data and zero photos before cleanup.
+- The workflow was unpublished before database inspection. Exact-ID cleanup execution `4568` deleted one profile, one session, one moderation row, zero photos, and seven audit rows from this run while preserving the user and Telegram account.
+- The cleanup statement's same-command residual count reflected PostgreSQL's original statement snapshot, so it was not used as post-cleanup evidence. A separate read-only execution `4569` confirmed zero profiles, sessions, photos, moderation rows, and current-run audits; it preserved the user, Telegram account, and one older audit row.
+- Final test workflow state: `active = false`, `activeVersionId = null`. The cleanup helper was restored to its inactive read-only query.
+
 ## Remaining boundaries
 
 - This is still a canvas snapshot (`nodes/connections/pinData/meta`), not a full workflow export with workflow ID, active state, settings, and draft/active version IDs.
@@ -217,4 +235,4 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 
 ## Safe next step
 
-With separate approval, temporarily activate only `WF_01_USER_REGISTRATION_TELEGRAM_TEST_59NODE` and repeat the live test with continuous `/start` attempts inside and outside the 10-second window, `role:man` followed by `role:woman`, the `пропуск` alias, one pending photo, and one post-profile photo. Production publish still requires a separate explicit approval.
+With separate approval, temporarily activate only `WF_01_USER_REGISTRATION_TELEGRAM_TEST_59NODE` for the remaining transport checks: wait more than 10 seconds after the last `/start`, choose `role:man` followed immediately by `role:woman`, send one pending photo, and send one distinct post-profile photo. Production publish still requires a separate explicit approval.
