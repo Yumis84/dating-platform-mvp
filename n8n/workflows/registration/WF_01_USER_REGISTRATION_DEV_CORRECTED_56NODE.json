@@ -533,7 +533,586 @@
     },
     {
       "parameters": {
-        "chatId"…6573 tokens truncated…URNING id\n),\nmoderation AS (\n  INSERT INTO profile_moderation (profile_id, moderator_type, status)\n  SELECT completed.profile_id, 'AI', 'PENDING'\n  FROM completed\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM profile_moderation pm\n    WHERE pm.profile_id = completed.profile_id\n      AND pm.status = 'PENDING'\n  )\n  RETURNING id\n)\nSELECT\n  completed.id::text AS session_id,\n  completed.profile_id::text AS profile_id,\n  (SELECT count(*) FROM materialized_photos) AS photos_materialized,\n  EXISTS (SELECT 1 FROM profile_audit) OR EXISTS (\n    SELECT 1 FROM audit_events ae\n    WHERE ae.event_type = 'profile_created'\n      AND ae.event_data->>'profile_id' = completed.profile_id::text\n  ) AS audit_ready,\n  EXISTS (SELECT 1 FROM moderation) OR EXISTS (\n    SELECT 1 FROM profile_moderation pm\n    WHERE pm.profile_id = completed.profile_id\n      AND pm.status = 'PENDING'\n  ) AS moderation_ready\nFROM completed;",
+        "chatId": "={{$('Extract photo vars').item.json.chat_id}}",
+        "text": "Сначала нажмите /start и начните заполнение анкеты.",
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
+      },
+      "id": "c27a1b3f-11ec-466f-b820-412ef7b341ab",
+      "name": "Send photo fallback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        688
+      ],
+      "webhookId": "b5a61a56-84ee-49f5-b983-1716d2edd2e8",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.message && $json.message.text ? /^\\/start(@\\w+)?(\\s|$)/.test($json.message.text.toString()) : false}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "16a3423c-27ca-4c8c-b3a9-dded0c929620",
+      "name": "Is /start?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        624,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "={{$json.message.from.id}}"
+            },
+            {
+              "name": "username",
+              "value": "={{$json.message.from.username}}"
+            },
+            {
+              "name": "first_name",
+              "value": "={{$json.message.from.first_name}}"
+            },
+            {
+              "name": "last_name",
+              "value": "={{$json.message.from.last_name}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8c33b6ff-bdf2-42c2-b05c-789e5c0bd5c6",
+      "name": "Extract User Info",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        848,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  EXISTS (\n    SELECT 1 FROM telegram_accounts WHERE telegram_id = $1::bigint\n  ) AS user_exists,\n  (\n    SELECT user_id::text\n    FROM telegram_accounts\n    WHERE telegram_id = $1::bigint\n    LIMIT 1\n  ) AS user_id,\n  $1::bigint AS telegram_id,\n  COALESCE($2::text, '') AS username;",
+        "additionalFields": {
+          "queryParams": "telegram_id,username"
+        }
+      },
+      "id": "3ccc6d94-4044-40d7-8832-1278712062b5",
+      "name": "Check user exists",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        880
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.user_exists === true}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "8798cc4d-9834-47d7-8f68-5fd7f31fb1c7",
+      "name": "User exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE telegram_accounts\nSET username = COALESCE($1::text, '')\nWHERE telegram_id = $2::bigint\nRETURNING user_id::text AS user_id, telegram_id, username;",
+        "additionalFields": {
+          "queryParams": "username,telegram_id"
+        }
+      },
+      "id": "1065ac90-1b01-48c2-bb0a-661744c3b2bd",
+      "name": "Update telegram_account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        688
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT $1::uuid AS user_id\n),\nlock_attempt AS (\n  SELECT pg_try_advisory_xact_lock(\n    hashtext('wf01:start'),\n    hashtext(input.user_id::text)\n  ) AS acquired\n  FROM input\n),\nrecent_prompt AS (\n  SELECT 1\n  FROM audit_events ae\n  CROSS JOIN input\n  CROSS JOIN lock_attempt\n  WHERE lock_attempt.acquired\n    AND ae.user_id = input.user_id\n    AND ae.event_type = 'start_prompt_sent'\n    AND ae.created_at >= now() - interval '3 seconds'\n  LIMIT 1\n),\nlogged_prompt AS (\n  INSERT INTO audit_events (user_id, event_type, event_data)\n  SELECT input.user_id, 'start_prompt_sent', '{}'::jsonb\n  FROM input\n  CROSS JOIN lock_attempt\n  WHERE lock_attempt.acquired\n    AND NOT EXISTS (SELECT 1 FROM recent_prompt)\n  RETURNING id\n),\nactive AS (\n  SELECT\n    s.id::text AS session_id,\n    s.current_step,\n    COALESCE(s.ai_context, '{}'::jsonb) AS ai_context\n  FROM profile_ai_sessions s\n  CROSS JOIN input\n  WHERE s.user_id = input.user_id\n    AND s.status = 'IN_PROGRESS'\n  ORDER BY s.created_at DESC, s.id\n  LIMIT 1\n),\nexisting_profile AS (\n  SELECT p.id\n  FROM profiles p\n  CROSS JOIN input\n  WHERE p.user_id = input.user_id\n  ORDER BY p.created_at, p.id\n  LIMIT 1\n),\nstate AS (\n  SELECT session_id, current_step, ai_context\n  FROM active\n  UNION ALL\n  SELECT NULL::text AS session_id, 10 AS current_step, '{}'::jsonb AS ai_context\n  FROM existing_profile\n  WHERE NOT EXISTS (SELECT 1 FROM active)\n  UNION ALL\n  SELECT NULL::text AS session_id, NULL::int AS current_step, '{}'::jsonb AS ai_context\n  WHERE NOT EXISTS (SELECT 1 FROM active)\n    AND NOT EXISTS (SELECT 1 FROM existing_profile)\n  LIMIT 1\n)\nSELECT\n  state.session_id,\n  state.current_step,\n  state.ai_context,\n  EXISTS (SELECT 1 FROM logged_prompt) AS should_respond\nFROM state;",
+        "additionalFields": {
+          "queryParams": "user_id"
+        }
+      },
+      "id": "1bb0c53e-1fc1-4001-95af-49ba44ec1f01",
+      "name": "Load start session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        688
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.current_step !== undefined && $json.current_step !== null}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "12ab8d21-a8d7-4b34-b6f3-dc42cfbbc945",
+      "name": "Has start session?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "current_step",
+              "value": "={{['Как тебя зовут?','Сколько тебе лет?','В каком городе живёшь?','Расскажи немного о себе.','Какие у тебя интересы?','Какова цель знакомства?','Расскажи о своих хобби. Можно пропустить.','Чем ты занимаешься / где работаешь? Можно пропустить.','Какое у тебя образование? Можно пропустить.','Какой стиль общения тебе ближе? Можно пропустить.'][$json.current_step] || 'Анкета уже заполнена. Просмотр анкет пока не реализован.'}}"
+            },
+            {
+              "name": "question_text",
+              "value": "={{['Как тебя зовут?','Сколько тебе лет?','В каком городе живёшь?','Расскажи немного о себе.','Какие у тебя интересы?','Какова цель знакомства?','Расскажи о своих хобби. Можно пропустить.','Чем ты занимаешься / где работаешь? Можно пропустить.','Какое у тебя образование? Можно пропустить.','Какой стиль общения тебе ближе? Можно пропустить.'][$json.current_step] || 'Анкета уже заполнена.'}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a311b627-5d89-45a8-b950-983c11ef5c4f",
+      "name": "Prepare resume question",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        2192,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract User Info').item.json.telegram_id}}",
+        "text": "={{$(\"Prepare resume question\").item.json.question_text}}",
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
+      },
+      "id": "329b4a6e-78fc-4ce2-bc42-455ad3e1f5f8",
+      "name": "Send resume question",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        2416,
+        592
+      ],
+      "webhookId": "3e3ea299-68c8-4d35-9126-14b5dd49cc1b",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Extract User Info').item.json.telegram_id}}",
+        "text": "Добро пожаловать.\nВыберите роль.",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Мужчина",
+                    "additionalFields": {
+                      "callback_data": "role:man"
+                    }
+                  },
+                  {
+                    "text": "Девушка",
+                    "additionalFields": {
+                      "callback_data": "role:woman"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {},
+        "resource": "message",
+        "operation": "sendMessage"
+      },
+      "id": "c4efc72b-4a15-4288-b0ad-717270647dce",
+      "name": "Send welcome",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        2192,
+        976
+      ],
+      "webhookId": "52fe21ef-8ad0-4848-9529-38b0a355e388",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT $1::bigint AS telegram_id, COALESCE($2::text, '') AS username\n),\nlocked AS (\n  SELECT pg_advisory_xact_lock(input.telegram_id)\n  FROM input\n),\nexisting AS (\n  SELECT ta.user_id\n  FROM telegram_accounts ta\n  CROSS JOIN input\n  CROSS JOIN locked\n  WHERE ta.telegram_id = input.telegram_id\n  LIMIT 1\n),\nnew_user AS (\n  INSERT INTO users (role)\n  SELECT NULL::varchar\n  FROM input\n  CROSS JOIN locked\n  WHERE NOT EXISTS (SELECT 1 FROM existing)\n  RETURNING id\n),\nchosen AS (\n  SELECT COALESCE(\n    (SELECT user_id FROM existing),\n    (SELECT id FROM new_user)\n  ) AS user_id\n),\nupsert_account AS (\n  INSERT INTO telegram_accounts (user_id, telegram_id, username)\n  SELECT chosen.user_id, input.telegram_id, input.username\n  FROM chosen\n  CROSS JOIN input\n  ON CONFLICT (telegram_id) DO UPDATE\n  SET username = EXCLUDED.username\n  RETURNING user_id, telegram_id, username\n),\ncleanup_orphan AS (\n  DELETE FROM users u\n  USING new_user, upsert_account\n  WHERE u.id = new_user.id\n    AND upsert_account.user_id <> new_user.id\n  RETURNING u.id\n)\nSELECT\n  user_id::text AS user_id,\n  telegram_id,\n  username,\n  (SELECT count(*) FROM cleanup_orphan) AS orphan_users_removed\nFROM upsert_account;",
+        "additionalFields": {
+          "queryParams": "telegram_id,username"
+        }
+      },
+      "id": "af84019c-d256-435f-aa88-ee41f5e99777",
+      "name": "Create user",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        1024
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT user_id::text AS user_id, telegram_id, username\nFROM telegram_accounts\nWHERE user_id = $1::uuid\n  AND telegram_id = $2::bigint\nLIMIT 1;",
+        "additionalFields": {
+          "queryParams": "user_id,telegram_id"
+        }
+      },
+      "id": "1411f539-b736-4790-a4f8-ffbb915ce3b4",
+      "name": "Verify telegram_account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        1024
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT $1::uuid AS user_id\n),\ninserted AS (\n  INSERT INTO audit_events (user_id, event_type, event_data)\n  SELECT input.user_id, 'registration', jsonb_build_object('source', 'telegram')\n  FROM input\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM audit_events ae\n    WHERE ae.user_id = input.user_id\n      AND ae.event_type = 'registration'\n  )\n  RETURNING id, user_id\n)\nSELECT id::text AS id, user_id::text AS user_id, true AS audit_created\nFROM inserted\nUNION ALL\nSELECT NULL::text AS id, input.user_id::text AS user_id, false AS audit_created\nFROM input\nWHERE NOT EXISTS (SELECT 1 FROM inserted)\nLIMIT 1;",
+        "additionalFields": {
+          "queryParams": "user_id"
+        }
+      },
+      "id": "1d1b88e9-95c7-4e0c-b87a-54c0c9491689",
+      "name": "Create audit_event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        1024
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [],
+          "number": [],
+          "string": [
+            {
+              "name": "telegram_id",
+              "value": "={{$json.message.from.id}}"
+            },
+            {
+              "name": "chat_id",
+              "value": "={{$json.message.chat.id}}"
+            },
+            {
+              "name": "text",
+              "value": "={{$json.message.text}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2ef4d32-0774-4c39-b1ca-3d0dcab233fe",
+      "name": "Extract message vars",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        848,
+        1408
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT (\n  SELECT user_id::text\n  FROM telegram_accounts\n  WHERE telegram_id = $1::bigint\n  LIMIT 1\n) AS user_id;",
+        "additionalFields": {
+          "queryParams": "telegram_id"
+        }
+      },
+      "id": "cf66ef4d-b8d2-4ced-9c12-848a89165b1b",
+      "name": "Resolve text user",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        1408
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.user_id !== null && $json.user_id !== undefined}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "98112cf4-7a8f-4e21-90f5-550c26126e51",
+      "name": "Text user found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        1408
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH active AS (\n  SELECT\n    s.id::text AS session_id,\n    s.user_id::text AS user_id,\n    s.current_step,\n    COALESCE(s.ai_context, '{}'::jsonb) AS ai_context,\n    s.status,\n    false AS profile_exists\n  FROM profile_ai_sessions s\n  WHERE s.user_id = $1::uuid\n    AND s.status = 'IN_PROGRESS'\n  ORDER BY s.created_at DESC, s.id\n  LIMIT 1\n),\nexisting_profile AS (\n  SELECT p.user_id\n  FROM profiles p\n  WHERE p.user_id = $1::uuid\n  ORDER BY p.created_at, p.id\n  LIMIT 1\n)\nSELECT session_id, user_id, current_step, ai_context, status, profile_exists\nFROM active\nUNION ALL\nSELECT\n  NULL::text AS session_id,\n  existing_profile.user_id::text AS user_id,\n  10 AS current_step,\n  '{}'::jsonb AS ai_context,\n  'COMPLETED'::text AS status,\n  true AS profile_exists\nFROM existing_profile\nWHERE NOT EXISTS (SELECT 1 FROM active)\nLIMIT 1;",
+        "additionalFields": {
+          "queryParams": "user_id"
+        }
+      },
+      "id": "39dbd3d3-2bb6-41fd-ae4b-001072d55eb6",
+      "name": "Load active session",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        1312
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.session_id !== undefined && $json.session_id !== null}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "f9b1666d-4ed7-4eb2-9a69-6870eb244487",
+      "name": "Has active session?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $input.first().json;\nconst step = Number(s.current_step);\nconst rawText = ($('Extract message vars').first().json.text || '').toString();\nconst answer = rawText.trim();\nconst fields = ['name','age','city','description','interests','purpose','hobbies','job','education','communication_style'];\nlet field = (step >= 0 && step <= 9) ? fields[step] : '__invalid__';\nlet valid = true;\nlet error = '';\nlet value = answer;\nif (!Number.isInteger(step) || step < 0) {\n  valid = false;\n  error = 'Произошла ошибка сессии. Нажмите /start, чтобы начать заново.';\n} else if (step >= 10) {\n  valid = false;\n  error = 'Анкета уже заполнена и ожидает модерации.';\n} else {\n  const isSkip = /^(пропустить|пропуск|skip|-|нет)$/i.test(answer);\n  if (step >= 6 && isSkip) {\n    value = null;\n  } else if (step === 0) {\n    if (!answer) { valid = false; error = 'Имя не может быть пустым. Как тебя зовут?'; }\n  } else if (step === 1) {\n    const n = parseInt(answer, 10);\n    if (!/^[0-9]{1,3}$/.test(answer) || n < 18 || n > 100) { valid = false; error = 'Возраст должен быть числом от 18 до 100. Сколько тебе лет?'; } else { value = n; }\n  } else if (step === 2) {\n    if (!answer) { valid = false; error = 'Город не может быть пустым. В каком городе живёшь?'; }\n  } else if (step === 3) {\n    if (!answer) { valid = false; error = 'Расскажи немного о себе.'; }\n  } else if (step === 4) {\n    const interests = answer.split(',').map(function (x) { return x.trim(); }).filter(function (x) { return x; });\n    if (interests.length === 0) { valid = false; error = 'Укажи хотя бы один интерес.'; } else { value = interests; }\n  } else if (step === 5) {\n    if (!answer) { valid = false; error = 'Укажи цель знакомства.'; }\n  } else {\n    if (!answer) { value = null; }\n  }\n}\nconst nextStep = valid ? step + 1 : step;\nconst valueJson = JSON.stringify(value === undefined ? null : value);\n\nreturn [{ json: {\n  valid: valid,\n  error_message: error,\n  field_name: field,\n  field_path: '{' + field + '}',\n  field_value_json: valueJson,\n  current_step: step,\n  next_step: nextStep,\n  session_id: s.session_id,\n  user_id: s.user_id,\n  chat_id: $('Extract message vars').first().json.chat_id,\n  finalize: valid && nextStep >= 10\n} }];"
+      },
+      "id": "908ae9ea-8f3e-4b2b-a218-7d9812024c03",
+      "name": "Validate answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1968,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.valid === true}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "55da7b4e-4ddf-4f5f-962a-88cebf512e8d",
+      "name": "Answer valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2192,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH current AS (\n  SELECT id, user_id, current_step, COALESCE(ai_context, '{}'::jsonb) AS ai_context\n  FROM profile_ai_sessions\n  WHERE id = $1::uuid\n    AND status = 'IN_PROGRESS'\n  FOR UPDATE\n),\nupdated AS (\n  UPDATE profile_ai_sessions s\n  SET ai_context = jsonb_set(\n        COALESCE(s.ai_context, '{}'::jsonb),\n        $2::text[],\n        $3::jsonb,\n        true\n      ),\n      current_step = $4::int,\n      updated_at = now()\n  FROM current\n  WHERE s.id = current.id\n    AND current.current_step = $5::int\n  RETURNING s.id, s.user_id, s.current_step,\n            COALESCE(s.ai_context, '{}'::jsonb) AS ai_context\n)\nSELECT id::text AS id, user_id::text AS user_id, current_step, ai_context, true AS saved\nFROM updated\nUNION ALL\nSELECT id::text AS id, user_id::text AS user_id, current_step, ai_context, false AS saved\nFROM current\nWHERE NOT EXISTS (SELECT 1 FROM updated)\nLIMIT 1;",
+        "additionalFields": {
+          "queryParams": "session_id,field_path,field_value_json,next_step,current_step"
+        }
+      },
+      "id": "668d4327-fe14-42df-a1f0-a4dfd5751cbb",
+      "name": "Save answer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        2416,
+        1120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "caq2JyQzouyoC7gv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.saved === true && Number($json.current_step) >= 10}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "id": "078a2563-5bd1-424c-9598-c2429e0dc61c",
+      "name": "Onboarding complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH seed AS (\n  SELECT user_id\n  FROM profile_ai_sessions\n  WHERE id = $1::uuid\n),\nlocked AS (\n  SELECT pg_advisory_xact_lock(hashtext(seed.user_id::text))\n  FROM seed\n),\nsess AS (\n  SELECT s.id, s.user_id, COALESCE(s.ai_context, '{}'::jsonb) AS ai_context\n  FROM profile_ai_sessions s\n  CROSS JOIN locked\n  WHERE s.id = $1::uuid\n    AND s.status = 'IN_PROGRESS'\n    AND s.current_step >= 10\n    AND NULLIF(btrim(s.ai_context->>'name'), '') IS NOT NULL\n    AND (s.ai_context->>'age') ~ '^[0-9]{1,3}$'\n    AND (s.ai_context->>'age')::int BETWEEN 18 AND 100\n    AND NULLIF(btrim(s.ai_context->>'city'), '') IS NOT NULL\n    AND NULLIF(btrim(s.ai_context->>'description'), '') IS NOT NULL\n    AND jsonb_typeof(s.ai_context->'interests') = 'array'\n    AND jsonb_array_length(s.ai_context->'interests') > 0\n    AND NULLIF(btrim(s.ai_context->>'purpose'), '') IS NOT NULL\n  FOR UPDATE OF s\n),\nexisting AS (\n  SELECT p.id\n  FROM profiles p\n  WHERE p.user_id = (SELECT user_id FROM sess)\n  ORDER BY p.created_at, p.id\n  LIMIT 1\n),\nupdated_profile AS (\n  UPDATE profiles p\n  SET name = sess.ai_context->>'name',\n      age = (sess.ai_context->>'age')::int,\n      city = sess.ai_context->>'city',\n      description = sess.ai_context->>'description',\n      interests = sess.ai_context->'interests',\n      preferences = (\n        COALESCE(p.preferences, '{}'::jsonb)\n        - ARRAY['purpose', 'hobbies', 'job', 'education', 'communication_style']::text[]\n      ) || jsonb_strip_nulls(jsonb_build_object(\n        'purpose', sess.ai_context->'purpose',\n        'hobbies', sess.ai_context->'hobbies',\n        'job', sess.ai_context->'job',\n        'education', sess.ai_context->'education',\n        'communication_style', sess.ai_context->'communication_style'\n      )),\n      status = 'PENDING_MODERATION',\n      updated_at = now()\n  FROM sess\n  WHERE p.id = (SELECT id FROM existing)\n  RETURNING p.id\n),\ninserted_profile AS (\n  INSERT INTO profiles (\n    user_id, status, name, age, city, description, interests, preferences\n  )\n  SELECT\n    sess.user_id,\n    'PENDING_MODERATION',\n    sess.ai_context->>'name',\n    (sess.ai_context->>'age')::int,\n    sess.ai_context->>'city',\n    sess.ai_context->>'description',\n    sess.ai_context->'interests',\n    jsonb_strip_nulls(jsonb_build_object(\n      'purpose', sess.ai_context->'purpose',\n      'hobbies', sess.ai_context->'hobbies',\n      'job', sess.ai_context->'job',\n      'education', sess.ai_context->'education',\n      'communication_style', sess.ai_context->'communication_style'\n    ))\n  FROM sess\n  WHERE NOT EXISTS (SELECT 1 FROM existing)\n  RETURNING id\n),\npid AS (\n  SELECT COALESCE(\n    (SELECT id FROM updated_profile),\n    (SELECT id FROM inserted_profile)\n  ) AS profile_id\n),\npending AS (\n  SELECT\n    elem->>'telegram_file_id' AS telegram_file_id,\n    MIN(\n      CASE\n        WHEN (elem->>'position') ~ '^[0-9]+$' THEN (elem->>'position')::int\n        ELSE 0\n      END\n    ) AS pending_position\n  FROM sess\n  CROSS JOIN LATERAL jsonb_array_elements(\n    CASE\n      WHEN jsonb_typeof(sess.ai_context->'pending_photos') = 'array'\n        THEN sess.ai_context->'pending_photos'\n      ELSE '[]'::jsonb\n    END\n  ) elem\n  WHERE NULLIF(elem->>'telegram_file_id', '') IS NOT NULL\n  GROUP BY elem->>'telegram_file_id'\n),\nordered_pending AS (\n  SELECT\n    telegram_file_id,\n    row_number() OVER (ORDER BY pending_position, telegram_file_id) AS ord\n  FROM pending\n),\nphoto_base AS (\n  SELECT COALESCE(MAX(position), -1) + 1 AS start_position\n  FROM profile_photos\n  WHERE profile_id = (SELECT profile_id FROM pid)\n),\nmaterialized_photos AS (\n  INSERT INTO profile_photos (profile_id, telegram_file_id, position)\n  SELECT\n    pid.profile_id,\n    ordered_pending.telegram_file_id,\n    photo_base.start_position + ordered_pending.ord - 1\n  FROM pid\n  CROSS JOIN photo_base\n  CROSS JOIN ordered_pending\n  WHERE pid.profile_id IS NOT NULL\n    AND NOT EXISTS (\n      SELECT 1\n      FROM profile_photos pp\n      WHERE pp.profile_id = pid.profile_id\n        AND pp.telegram_file_id = ordered_pending.telegram_file_id\n    )\n  RETURNING id\n),\ncompleted AS (\n  UPDATE profile_ai_sessions s\n  SET status = 'COMPLETED',\n      profile_id = pid.profile_id,\n      ai_context = COALESCE(s.ai_context, '{}'::jsonb) - 'pending_photos',\n      updated_at = now()\n  FROM pid\n  WHERE s.id = $1::uuid\n    AND pid.profile_id IS NOT NULL\n  RETURNING s.id, s.user_id, s.profile_id\n),\nprofile_audit AS (\n  INSERT INTO audit_events (user_id, event_type, event_data)\n  SELECT\n    completed.user_id,\n    'profile_created',\n    jsonb_build_object('profile_id', completed.profile_id)\n  FROM completed\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM audit_events ae\n    WHERE ae.event_type = 'profile_created'\n      AND ae.event_data->>'profile_id' = completed.profile_id::text\n  )\n  RETURNING id\n),\nmoderation AS (\n  INSERT INTO profile_moderation (profile_id, moderator_type, status)\n  SELECT completed.profile_id, 'AI', 'PENDING'\n  FROM completed\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM profile_moderation pm\n    WHERE pm.profile_id = completed.profile_id\n      AND pm.status = 'PENDING'\n  )\n  RETURNING id\n)\nSELECT\n  completed.id::text AS session_id,\n  completed.profile_id::text AS profile_id,\n  (SELECT count(*) FROM materialized_photos) AS photos_materialized,\n  EXISTS (SELECT 1 FROM profile_audit) OR EXISTS (\n    SELECT 1 FROM audit_events ae\n    WHERE ae.event_type = 'profile_created'\n      AND ae.event_data->>'profile_id' = completed.profile_id::text\n  ) AS audit_ready,\n  EXISTS (SELECT 1 FROM moderation) OR EXISTS (\n    SELECT 1 FROM profile_moderation pm\n    WHERE pm.profile_id = completed.profile_id\n      AND pm.status = 'PENDING'\n  ) AS moderation_ready\nFROM completed;",
         "additionalFields": {
           "queryParams": "id"
         }
@@ -728,7 +1307,7 @@
     {
       "parameters": {
         "chatId": "={{$('Extract message vars').item.json.chat_id}}",
-        "text": "Сейчас нет активной анкеты. Нажмите /start, чтобы начать.",
+        "text": "={{$json.profile_exists === true || $json.status === 'COMPLETED' || Number($json.current_step) >= 10 ? 'Анкета уже заполнена. Просмотр анкет пока не реализован.' : 'Сейчас нет активной анкеты. Нажмите /start, чтобы начать.'}}",
         "additionalFields": {},
         "resource": "message",
         "operation": "sendMessage"
@@ -818,6 +1397,29 @@
           "name": "@vstrechi18bot"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.should_respond === true}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "name": "Send start response?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1900,
+        720
+      ],
+      "id": "44795d56-43ea-4461-9adb-61b5c868601d"
     }
   ],
   "connections": {
@@ -1116,7 +1718,7 @@
       "main": [
         [
           {
-            "node": "Has start session?",
+            "node": "Send start response?",
             "type": "main",
             "index": 0
           }
@@ -1167,7 +1769,7 @@
       "main": [
         [
           {
-            "node": "Send welcome",
+            "node": "Load start session",
             "type": "main",
             "index": 0
           }
@@ -1384,6 +1986,18 @@
           }
         ]
       ]
+    },
+    "Send start response?": {
+      "main": [
+        [
+          {
+            "node": "Has start session?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
     }
   },
   "pinData": {},
@@ -1391,4 +2005,3 @@
     "instanceId": "7715b9e43263936ef7d5ead15b70c021d76e29a9bc1abb07d28243b86cc28821"
   }
 }
-
