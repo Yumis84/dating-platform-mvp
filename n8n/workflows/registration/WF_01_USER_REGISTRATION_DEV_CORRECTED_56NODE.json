@@ -163,7 +163,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE users\nSET role = $1::text,\n    updated_at = now()\nWHERE id = $2::uuid\n  AND $1::text IN ('man', 'woman')\nRETURNING id::text AS user_id, role;",
+        "query": "WITH input AS (\n  SELECT $2::uuid AS user_id, $1::text AS requested_role\n),\nlock_attempt AS (\n  SELECT pg_try_advisory_xact_lock(hashtext(input.user_id::text)) AS acquired\n  FROM input\n),\nactive AS (\n  SELECT s.id\n  FROM profile_ai_sessions s\n  CROSS JOIN input\n  CROSS JOIN lock_attempt\n  WHERE lock_attempt.acquired\n    AND s.user_id = input.user_id\n    AND s.status = 'IN_PROGRESS'\n  ORDER BY s.created_at DESC, s.id\n  LIMIT 1\n),\nprofile_exists AS (\n  SELECT p.id\n  FROM profiles p\n  CROSS JOIN input\n  CROSS JOIN lock_attempt\n  WHERE lock_attempt.acquired\n    AND p.user_id = input.user_id\n  ORDER BY p.created_at, p.id\n  LIMIT 1\n),\nupdated_user AS (\n  UPDATE users u\n  SET role = input.requested_role,\n      updated_at = now()\n  FROM input\n  CROSS JOIN lock_attempt\n  WHERE u.id = input.user_id\n    AND lock_attempt.acquired\n    AND input.requested_role IN ('man', 'woman')\n    AND NOT EXISTS (SELECT 1 FROM active)\n    AND NOT EXISTS (SELECT 1 FROM profile_exists)\n  RETURNING u.id, u.role\n),\ncreated_session AS (\n  INSERT INTO profile_ai_sessions (\n    user_id, profile_id, current_step, ai_context, status, created_at, updated_at\n  )\n  SELECT updated_user.id, NULL, 0, '{}'::jsonb, 'IN_PROGRESS', now(), now()\n  FROM updated_user\n  RETURNING id, user_id\n),\naccepted AS (\n  SELECT\n    updated_user.id::text AS user_id,\n    updated_user.role,\n    created_session.id::text AS session_id,\n    true AS accepted\n  FROM updated_user\n  JOIN created_session ON created_session.user_id = updated_user.id\n),\nrejected AS (\n  SELECT\n    u.id::text AS user_id,\n    u.role,\n    active.id::text AS session_id,\n    false AS accepted\n  FROM input\n  JOIN users u ON u.id = input.user_id\n  LEFT JOIN active ON true\n  WHERE NOT EXISTS (SELECT 1 FROM accepted)\n)\nSELECT * FROM accepted\nUNION ALL\nSELECT * FROM rejected\nLIMIT 1;",
         "additionalFields": {
           "queryParams": "role,user_id"
         }
@@ -687,7 +687,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH input AS (\n  SELECT $1::uuid AS user_id\n),\nlock_attempt AS (\n  SELECT pg_try_advisory_xact_lock(\n    hashtext('wf01:start'),\n    hashtext(input.user_id::text)\n  ) AS acquired\n  FROM input\n),\nrecent_prompt AS (\n  SELECT 1\n  FROM audit_events ae\n  CROSS JOIN input\n  CROSS JOIN lock_attempt\n  WHERE lock_attempt.acquired\n    AND ae.user_id = input.user_id\n    AND ae.event_type = 'start_prompt_sent'\n    AND ae.created_at >= now() - interval '3 seconds'\n  LIMIT 1\n),\nlogged_prompt AS (\n  INSERT INTO audit_events (user_id, event_type, event_data)\n  SELECT input.user_id, 'start_prompt_sent', '{}'::jsonb\n  FROM input\n  CROSS JOIN lock_attempt\n  WHERE lock_attempt.acquired\n    AND NOT EXISTS (SELECT 1 FROM recent_prompt)\n  RETURNING id\n),\nactive AS (\n  SELECT\n    s.id::text AS session_id,\n    s.current_step,\n    COALESCE(s.ai_context, '{}'::jsonb) AS ai_context\n  FROM profile_ai_sessions s\n  CROSS JOIN input\n  WHERE s.user_id = input.user_id\n    AND s.status = 'IN_PROGRESS'\n  ORDER BY s.created_at DESC, s.id\n  LIMIT 1\n),\nexisting_profile AS (\n  SELECT p.id\n  FROM profiles p\n  CROSS JOIN input\n  WHERE p.user_id = input.user_id\n  ORDER BY p.created_at, p.id\n  LIMIT 1\n),\nstate AS (\n  SELECT session_id, current_step, ai_context\n  FROM active\n  UNION ALL\n  SELECT NULL::text AS session_id, 10 AS current_step, '{}'::jsonb AS ai_context\n  FROM existing_profile\n  WHERE NOT EXISTS (SELECT 1 FROM active)\n  UNION ALL\n  SELECT NULL::text AS session_id, NULL::int AS current_step, '{}'::jsonb AS ai_context\n  WHERE NOT EXISTS (SELECT 1 FROM active)\n    AND NOT EXISTS (SELECT 1 FROM existing_profile)\n  LIMIT 1\n)\nSELECT\n  state.session_id,\n  state.current_step,\n  state.ai_context,\n  EXISTS (SELECT 1 FROM logged_prompt) AS should_respond\nFROM state;",
+        "query": "WITH input AS (\n  SELECT $1::uuid AS user_id\n),\nlock_guard AS (\n  SELECT pg_advisory_xact_lock(\n    hashtext('wf01:start'),\n    hashtext(input.user_id::text)\n  ) AS acquired\n  FROM input\n),\nrecent_attempt AS (\n  SELECT 1\n  FROM audit_events ae\n  CROSS JOIN input\n  CROSS JOIN lock_guard\n  WHERE ae.user_id = input.user_id\n    AND ae.event_type = 'start_prompt_seen'\n    AND ae.created_at >= now() - interval '10 seconds'\n  LIMIT 1\n),\nlogged_attempt AS (\n  INSERT INTO audit_events (user_id, event_type, event_data)\n  SELECT\n    input.user_id,\n    'start_prompt_seen',\n    jsonb_build_object('responded', NOT EXISTS (SELECT 1 FROM recent_attempt))\n  FROM input\n  CROSS JOIN lock_guard\n  RETURNING COALESCE((event_data->>'responded')::boolean, false) AS responded\n),\nactive AS (\n  SELECT\n    s.id::text AS session_id,\n    s.current_step,\n    COALESCE(s.ai_context, '{}'::jsonb) AS ai_context\n  FROM profile_ai_sessions s\n  CROSS JOIN input\n  WHERE s.user_id = input.user_id\n    AND s.status = 'IN_PROGRESS'\n  ORDER BY s.created_at DESC, s.id\n  LIMIT 1\n),\nexisting_profile AS (\n  SELECT p.id\n  FROM profiles p\n  CROSS JOIN input\n  WHERE p.user_id = input.user_id\n  ORDER BY p.created_at, p.id\n  LIMIT 1\n),\nstate AS (\n  SELECT session_id, current_step, ai_context\n  FROM active\n  UNION ALL\n  SELECT NULL::text AS session_id, 10 AS current_step, '{}'::jsonb AS ai_context\n  FROM existing_profile\n  WHERE NOT EXISTS (SELECT 1 FROM active)\n  UNION ALL\n  SELECT NULL::text AS session_id, NULL::int AS current_step, '{}'::jsonb AS ai_context\n  WHERE NOT EXISTS (SELECT 1 FROM active)\n    AND NOT EXISTS (SELECT 1 FROM existing_profile)\n  LIMIT 1\n)\nSELECT\n  state.session_id,\n  state.current_step,\n  state.ai_context,\n  EXISTS (SELECT 1 FROM logged_attempt WHERE responded) AS should_respond\nFROM state;",
         "additionalFields": {
           "queryParams": "user_id"
         }
@@ -1420,6 +1420,53 @@
         720
       ],
       "id": "44795d56-43ea-4461-9adb-61b5c868601d"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.accepted === true}}",
+              "value2": true
+            }
+          ],
+          "number": [],
+          "string": [],
+          "dateTime": []
+        }
+      },
+      "name": "Role selection accepted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        16
+      ],
+      "id": "1d0ae10e-9398-4f96-bf9b-951f752e7e86"
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "operation": "answerQuery",
+        "queryId": "={{$('Extract role vars').item.json.callback_query_id}}",
+        "additionalFields": {
+          "text": "Роль уже выбрана. Продолжи заполнение анкеты."
+        }
+      },
+      "name": "answerCallbackQuery (role locked)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1632,
+        16
+      ],
+      "id": "2d62c269-c6d7-47a7-b067-5334af17c349",
+      "credentials": {
+        "telegramApi": {
+          "id": "iq6xvKahi25BYuys",
+          "name": "@vstrechi18bot"
+        }
+      }
     }
   ],
   "connections": {
@@ -1514,7 +1561,7 @@
       "main": [
         [
           {
-            "node": "answerCallbackQuery",
+            "node": "Role selection accepted?",
             "type": "main",
             "index": 0
           }
@@ -1997,6 +2044,24 @@
           }
         ],
         []
+      ]
+    },
+    "Role selection accepted?": {
+      "main": [
+        [
+          {
+            "node": "answerCallbackQuery",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "answerCallbackQuery (role locked)",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
