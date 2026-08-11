@@ -2,7 +2,7 @@
 
 Date: 2026-08-11
 
-Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS. Imported only as a separate inactive DEV workflow. Not approved for activation or production publish.**
+Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS + TELEGRAM TRANSPORT PARTIAL PASS. Imported only as a separate inactive DEV workflow. Not approved for production activation or publish.**
 
 ## Artifact
 
@@ -130,6 +130,24 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Harness execution `4478` stopped at SQL parse time before DML because the harness generator emitted JavaScript identifier quotes for text literals. The harness-only escaping was corrected and revalidated before successful execution `4479`; corrected WF_01 SQL was unchanged
 - Existing `WF_01_USER_REGISTRATION_0001` and `WF_01_USER_REGISTRATION copy` were not overwritten
 
+## Live Telegram transport test
+
+- Isolated workflow: `cXeonlxpKEG9FBzt` (`WF_01_USER_REGISTRATION_TELEGRAM_TEST_56NODE`)
+- Test credential: `@test39n8n_bot`; no production Telegram credential was used
+- Temporary active version: `c2b34d03-c4f7-4ada-a0c2-6202e33bae21`
+- The workflow was activated only for the test window and then deactivated; final state is `active = false`, `activeVersionId = null`
+- Webhook executions `4480`-`4503`: 24/24 completed with status `success`
+- Registration, role selection, steps `0..9`, finalization, completed-profile `/start`, and no-active-session fallback routes executed without node errors
+- Final database state before cleanup: one `PENDING_MODERATION` profile, one `COMPLETED` session at `current_step = 10`, one pending AI moderation row, one `profile_created` audit row, and no photos
+- Field mapping was correct for name, age, city, description, interests, purpose, and optional values; `job`, `education`, and `communication_style` were stored as null after the accepted skip command
+- `пропуск` is not recognized as an optional-step skip command and was stored literally as `preferences.hobbies = "пропуск"`; `пропустить` is recognized
+- An extra `пропустить` advanced step 9 and finalized the profile before the later `ок` message. The `ок` execution correctly followed the no-active-session fallback, but the chat transcript made the responses appear attached to different user messages
+- Five rapid `/start` updates each produced a welcome response. Database duplicate protections held, but the transport currently has no per-chat debounce or duplicate `/start` response suppression
+- After completion, `/start` consistently followed `Send resume question` (`Анкета уже заполнена.`), while arbitrary text consistently followed `Send fallback (no session)`. The apparently inconsistent chat order was response interleaving, not incorrect branch routing
+- Commands such as `посмотреть анкеты` / `покажи анкеты` are outside WF_01 and currently fall through to the no-active-session message
+- The photo route was not exercised in this live test
+- Cleanup execution `4506`: PASS. It deleted only the current run profile, session, moderation row, and two current audit events; the pre-existing user, Telegram account, and eight earlier audit events were preserved
+
 ## Remaining boundaries
 
 - This is still a canvas snapshot (`nodes/connections/pinData/meta`), not a full workflow export with workflow ID, active state, settings, and draft/active version IDs.
@@ -143,5 +161,5 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 
 ## Safe next step
 
-Run an end-to-end Telegram transport test with a dedicated Telegram test account while keeping the corrected workflow isolated from production, then inspect the created rows and moderation state. This requires coordinating the test account and bot webhook/manual-listen window. Production publish still requires a separate explicit approval.
+Patch the transport UX before the next live test: normalize optional skip aliases (`пропуск`, `пропустить`, `-`), suppress repeated `/start` responses within a short per-chat window, and make the post-completion fallback explicitly distinguish unsupported commands from onboarding state. Then repeat the test with one pending photo and one post-profile photo. Production publish still requires a separate explicit approval.
 
