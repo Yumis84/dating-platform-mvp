@@ -2,24 +2,26 @@
 
 Date: 2026-08-11
 
-Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS + TWO TELEGRAM LIVE TESTS + UX PATCH VERIFIED. Imported only as separate inactive DEV/test workflows. Not approved for production activation or publish.**
+Status: **STATIC + SERVER DRAFT + SAFE SMOKE + DB INTEGRATION PASS + TWO TELEGRAM LIVE TESTS + UX/CONCURRENCY PATCH VERIFIED. Imported only as separate inactive DEV/test workflows. Not approved for production activation or publish.**
 
 ## Artifact
 
 - Corrected file: `n8n/workflows/registration/WF_01_USER_REGISTRATION_DEV_CORRECTED_56NODE.json`
-- The filename is retained for branch continuity; the current graph contains 57 nodes after the live-test UX patch
+- The filename is retained for branch continuity; the current graph contains 59 nodes after the live-test UX and concurrency patches
 - Derived from the immutable 54-node DEV snapshot
-- Nodes: 57
-- Connection sources: 44
-- Edges: 57
-- SHA-256: `14faefa01f223d317456a1e852b1a54ebb1cf5f783300a0e4a2b167440a6c328`
+- Nodes: 59
+- Connection sources: 45
+- Edges: 59
+- SHA-256: `5079367cd8577fee2acb4a9538829e409000b4eceed5f4dfaa8d65cc660ebffc`
 - Target `meta.instanceId`: `7715b9e43263936ef7d5ead15b70c021d76e29a9bc1abb07d28243b86cc28821`
 
-Three nodes were added to the 54-node source:
+Five nodes were added to the 54-node source:
 
 - `Is text?`
 - `Send fallback (unsupported message)`
 - `Send start response?`
+- `Role selection accepted?`
+- `answerCallbackQuery (role locked)`
 
 This prevents stickers, voice messages, contacts, locations, and documents from being processed as empty onboarding text answers.
 
@@ -59,8 +61,9 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 ### Session and answer concurrency
 
 - Session find-or-create is serialized by a per-user advisory transaction lock.
-- A role callback does not reset an existing `IN_PROGRESS` session.
-- If a profile already exists and there is no active session, a repeated role callback does not create a new onboarding session.
+- The first valid role callback atomically writes `users.role` and creates the `IN_PROGRESS` onboarding session under one per-user transaction lock.
+- Any later or concurrent role callback is rejected by `Role selection accepted?`; it cannot change the persisted role, create another session, write another role audit, or resend the first onboarding question.
+- If a profile already exists, a repeated role callback cannot create a new onboarding session.
 - `/start` resumes an active session; for an already-existing profile it returns `Анкета уже заполнена.` instead of starting an implicit overwrite flow.
 - `Save answer` locks the current session and updates only when `current_step` matches the validated expected step.
 - A stale concurrent answer is not written; the workflow reloads/returns the current step and asks the current question.
@@ -98,10 +101,10 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 ## Verification performed
 
 - JSON parse: PASS
-- Node count: 57
-- Unique node names: 57/57
-- Unique node IDs: 57/57
-- Reachable from `Telegram Trigger`: 57/57
+- Node count: 59
+- Unique node names: 59/59
+- Unique node IDs: 59/59
+- Reachable from `Telegram Trigger`: 59/59
 - Missing connection endpoints: 0
 - Missing named node references: 0
 - Graph cycles: 0
@@ -113,10 +116,10 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Legacy temporary `SELECT 'man'`: absent
 - Legacy `field_value_sql`: absent
 - Destructive SQL/migrations: absent
-- n8n server update validation: PASS, 57 nodes, no warnings on the Telegram test clone
-- n8n Workflow SDK validation: PASS, 57 nodes, no warnings
-- Draft import target: `eMMEhEMrqFe35F7l` (`WF_01_USER_REGISTRATION_DEV_CORRECTED_57NODE`)
-- Imported draft graph: 57 nodes, 57 edges, 57 unique names/IDs, no missing endpoints/references
+- n8n server update validation: PASS, 59 nodes, no warnings on the Telegram test clone
+- n8n Workflow SDK validation: PASS, 59 nodes, no warnings
+- Draft import target: `eMMEhEMrqFe35F7l` (`WF_01_USER_REGISTRATION_DEV_CORRECTED_59NODE`)
+- Imported draft graph: 59 nodes, 59 edges, 59 unique names/IDs, no missing endpoints/references
 - Imported draft state: `active = false`, `activeVersionId = null`, `triggerCount = 0`
 - Safe pin-data smoke tests: 22/22 PASS (executions `4426`-`4447`)
 - All canonical text-onboarding steps `0..9`: PASS, including validation, optional skip, stale-answer protection, and step-9 finalization routing
@@ -183,17 +186,35 @@ The typeVersion 1 parameter format was checked against the official n8n Postgres
 - Cleanup preserved the existing user, Telegram account, and all eight older audit rows. Read-only post-cleanup execution `4540` confirmed zero profiles, sessions, photos, moderation rows, and current-test audit rows
 - Final test workflow state: `active = false`, `activeVersionId = null`. The cleanup helper was restored to an inactive read-only audit query
 
+## Post-live role and `/start` concurrency patch (59 nodes)
+
+- Product decision confirmed: the first valid role selection wins for the current onboarding. `Update role` now obtains a per-user advisory transaction lock, updates `users.role`, and creates `profile_ai_sessions(status = IN_PROGRESS, current_step = 0)` atomically.
+- `Update role` returns an explicit `accepted` flag. The true branch continues through the normal callback response, role audit, idempotent session verification, and first question; the false branch only answers the callback with `Роль уже выбрана. Продолжи заполнение анкеты.`
+- A sequential or concurrent second callback cannot overwrite the first role. Because it does not enter the accepted branch, it cannot create a second `role_selected` audit row or duplicate the onboarding question.
+- Product decision confirmed: `/start` uses a sliding 10-second per-user response window. Each attempt is serialized with `pg_advisory_xact_lock`, recorded as `start_prompt_seen`, and stores only `event_data.responded`.
+- The first request after 10 seconds of silence records `responded = true` and reaches Telegram. Every subsequent request within 10 seconds records `responded = false`, sends no Telegram message, and extends the window from that latest attempt.
+- No table, column, index, migration, or destructive schema operation was added. Both changes use the canonical existing `users`, `profiles`, `profile_ai_sessions`, and `audit_events` schema.
+- Local corrected graph validation: 59 nodes, 59 edges, 59 reachable nodes, 59 unique names and IDs, no missing endpoints or named references, no cycles, no JavaScript syntax errors, no placeholder/parameter mismatches, and no SQL-expression warnings.
+- Local test-clone validation: the same 59/59 graph checks pass with exactly one test Telegram credential and the canonical PostgreSQL credential; no token is embedded in either artifact.
+- n8n Workflow SDK validation: corrected Telegram graph `valid = true`, `nodeCount = 59`; isolated DB harness `valid = true`, `nodeCount = 2`.
+- Corrected inactive DEV draft: `eMMEhEMrqFe35F7l` (`WF_01_USER_REGISTRATION_DEV_CORRECTED_59NODE`), 59 nodes, 59 edges, `active = false`, `activeVersionId = null`.
+- Inactive Telegram test clone: `cXeonlxpKEG9FBzt` (`WF_01_USER_REGISTRATION_TELEGRAM_TEST_59NODE`), 59 nodes, 59 edges, `active = false`, `activeVersionId = null`.
+- Saved connections are exactly `Update role -> Role selection accepted?`, true -> `answerCallbackQuery`, false -> `answerCallbackQuery (role locked)`.
+- Isolated DB integration execution `4541`: PASS, 37/37 runtime invariants, `cleanup = VERIFIED`, PostgreSQL node error: none.
+- New DB coverage proves that the first role is accepted with a new session, the second different role is rejected while the first role/session remain unchanged, two rapid `/start` attempts are both logged, and exactly one has `responded = true`.
+- No production workflow was edited, activated, unpublished, or published. The 59-node DEV/test workflows were not activated or published.
+
 ## Remaining boundaries
 
 - This is still a canvas snapshot (`nodes/connections/pinData/meta`), not a full workflow export with workflow ID, active state, settings, and draft/active version IDs.
 - All 18 SQL statements were parsed and type-checked by the confirmed test PostgreSQL database through `PREPARE`; no prepared statement was executed, so no `INSERT`, `UPDATE`, or `DELETE` took effect.
-- A separate isolated integration harness then executed the corrected registration/onboarding/finalization SQL against the confirmed test database. Its latest 35 assertions passed and its final cleanup assertion verified that no synthetic user, Telegram account, profile, session, audit, photo, or moderation rows remained.
+- A separate isolated integration harness then executed the corrected registration/onboarding/finalization SQL against the confirmed test database. Its latest 37 assertions passed and its final cleanup assertion verified that no synthetic user, Telegram account, profile, session, audit, photo, or moderation rows remained.
 - Advisory locks protect executions using this corrected workflow. Absolute cross-system guarantees still require future additive unique indexes after a duplicate-data audit; no migration was created or applied here.
 - Existing duplicate profiles/sessions/photos, if already present, are not deleted or reconciled.
 - The workflow queues `profile_moderation`; it does not call WF_04 directly. A separate worker/webhook contract is still required if no moderation worker polls this table.
 - No photo-count policy was added because no product limit was confirmed.
-- The corrected JSON was compiled through the n8n Workflow SDK and saved as separate inactive 57-node DEV/test workflows. The UX patch was verified by isolated database execution; neither workflow was activated or published after the patch.
+- The corrected JSON was compiled through the n8n Workflow SDK and saved as separate inactive 59-node DEV/test workflows. The UX and concurrency patches were verified by isolated database execution; neither workflow was activated or published after the patch.
 
 ## Safe next step
 
-With separate approval, temporarily activate only `WF_01_USER_REGISTRATION_TELEGRAM_TEST_57NODE` and repeat the live test with rapid `/start`, the `пропуск` alias, one pending photo, and one post-profile photo. Production publish still requires a separate explicit approval.
+With separate approval, temporarily activate only `WF_01_USER_REGISTRATION_TELEGRAM_TEST_59NODE` and repeat the live test with continuous `/start` attempts inside and outside the 10-second window, `role:man` followed by `role:woman`, the `пропуск` alias, one pending photo, and one post-profile photo. Production publish still requires a separate explicit approval.
