@@ -10,12 +10,22 @@
       "name": "WOMAN Profile Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 300],
+      "position": [
+        0,
+        300
+      ],
       "parameters": {
         "httpMethod": "POST",
         "path": "dev-woman-profile",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WF03_HEADER_AUTH_PLACEHOLDER",
+          "name": "WF03_HEADER_AUTH_PLACEHOLDER"
+        }
       }
     },
     {
@@ -23,7 +33,10 @@
       "name": "Normalize WOMAN Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 300],
+      "position": [
+        220,
+        300
+      ],
       "parameters": {
         "jsCode": "const body=$json.body||$json; const nullable=(v)=>v?String(v):null; return [{json:{telegram_id:nullable(body.telegram_id),chat_id:nullable(body.chat_id),update_type:String(body.update_type||''),user_id:String(body.user_id||''),session_id:nullable(body.session_id),profile_id:nullable(body.profile_id),text:String(body.message_text??body.text??'').trim(),photo_file_id:nullable(body.photo_file_id),message_id:nullable(body.message_id)}}];"
       }
@@ -33,7 +46,10 @@
       "name": "Load WOMAN Draft Session",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [440, 300],
+      "position": [
+        440,
+        300
+      ],
       "credentials": {
         "postgres": {
           "id": "POSTGRES_PLACEHOLDER",
@@ -42,8 +58,30 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'user_id')::uuid user_id,NULLIF(data->>'session_id','')::uuid session_id,NULLIF(data->>'profile_id','')::uuid profile_id FROM bind),\nchosen AS (\n SELECT s.id,s.user_id,s.profile_id\n FROM profile_ai_sessions s JOIN users u ON u.id=s.user_id JOIN profiles p ON p.id=s.profile_id\n CROSS JOIN input WHERE s.user_id=input.user_id AND (input.session_id IS NULL OR s.id=input.session_id) AND (input.profile_id IS NULL OR s.profile_id=input.profile_id) AND lower(u.role)='woman' AND s.status='IN_PROGRESS' AND p.status='DRAFT'\n ORDER BY s.created_at,s.id LIMIT 1\n)\nSELECT chosen.id::text session_id,chosen.user_id::text,chosen.profile_id::text,\n jsonb_build_object(\n  'profile',(SELECT to_jsonb(p)-'user_id'-'created_at'-'updated_at' FROM profiles p WHERE p.id=chosen.profile_id),\n  'prices',COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.position,x.id) FROM profile_prices x WHERE x.profile_id=chosen.profile_id AND x.is_active),'[]'::jsonb),\n  'meeting_places',COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.position,x.id) FROM profile_meeting_places x WHERE x.profile_id=chosen.profile_id AND x.is_active),'[]'::jsonb)\n ) existing_state\nFROM chosen;",
-        "options": {"queryReplacement": "={{JSON.stringify({user_id:$json.user_id,session_id:$json.session_id,profile_id:$json.profile_id})}}"}
+        "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT CASE WHEN data->>'user_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN (data->>'user_id')::uuid END user_id,CASE WHEN data->>'session_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN (data->>'session_id')::uuid END session_id,CASE WHEN data->>'profile_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN (data->>'profile_id')::uuid END profile_id FROM bind),\nchosen AS (\n SELECT s.id,s.user_id,s.profile_id\n FROM input JOIN profile_ai_sessions s ON s.user_id=input.user_id JOIN users u ON u.id=s.user_id JOIN profiles p ON p.id=s.profile_id\n WHERE input.user_id IS NOT NULL AND input.session_id IS NOT NULL AND input.profile_id IS NOT NULL AND s.id=input.session_id AND s.profile_id=input.profile_id AND lower(u.role)='woman' AND s.status='IN_PROGRESS' AND p.status='DRAFT'\n LIMIT 1\n)\nSELECT chosen.id IS NOT NULL session_available,chosen.id::text session_id,chosen.user_id::text,chosen.profile_id::text,CASE WHEN chosen.id IS NULL THEN NULL ELSE jsonb_build_object(\n  'profile',(SELECT to_jsonb(p)-'user_id'-'created_at'-'updated_at' FROM profiles p WHERE p.id=chosen.profile_id),\n  'prices',COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.position,x.id) FROM profile_prices x WHERE x.profile_id=chosen.profile_id AND x.is_active),'[]'::jsonb),\n  'meeting_places',COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.position,x.id) FROM profile_meeting_places x WHERE x.profile_id=chosen.profile_id AND x.is_active),'[]'::jsonb)\n ) END existing_state,CASE WHEN chosen.id IS NULL THEN false ELSE true END ok,CASE WHEN chosen.id IS NULL THEN 'WOMAN_SESSION_NOT_AVAILABLE' END code,CASE WHEN chosen.id IS NULL THEN 'Сессия анкеты недоступна. Нажмите /start.' END message\nFROM input LEFT JOIN chosen ON true;",
+        "options": {
+          "queryReplacement": "={{JSON.stringify({user_id:$json.user_id,session_id:$json.session_id,profile_id:$json.profile_id})}}"
+        }
+      }
+    },
+    {
+      "id": "wf03-session-available",
+      "name": "WOMAN Session Available",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        550,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.session_available === true}}",
+              "value2": true
+            }
+          ]
+        }
       }
     },
     {
@@ -51,7 +89,10 @@
       "name": "Is Photo",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [660, 300],
+      "position": [
+        660,
+        300
+      ],
       "parameters": {
         "conditions": {
           "string": [
@@ -68,7 +109,10 @@
       "name": "Save WOMAN Photo",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [880, 180],
+      "position": [
+        880,
+        180
+      ],
       "credentials": {
         "postgres": {
           "id": "POSTGRES_PLACEHOLDER",
@@ -78,7 +122,9 @@
       "parameters": {
         "operation": "executeQuery",
         "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'profile_id')::uuid profile_id,data->>'photo_file_id' telegram_file_id FROM bind),\nprofile_guard AS (SELECT pg_advisory_xact_lock(hashtext(input.profile_id::text)) FROM input)\nINSERT INTO profile_photos(profile_id,telegram_file_id,position)\nSELECT input.profile_id,input.telegram_file_id,COALESCE((SELECT MAX(p.position) FROM profile_photos p WHERE p.profile_id=input.profile_id),-1)+1\nFROM input CROSS JOIN profile_guard\nON CONFLICT(profile_id,telegram_file_id) WHERE profile_id IS NOT NULL AND telegram_file_id IS NOT NULL\nDO UPDATE SET telegram_file_id=EXCLUDED.telegram_file_id\nRETURNING id::text,position;",
-        "options": {"queryReplacement": "={{JSON.stringify({profile_id:$json.profile_id,photo_file_id:$('Normalize WOMAN Input').item.json.photo_file_id})}}"}
+        "options": {
+          "queryReplacement": "={{JSON.stringify({profile_id:$json.profile_id,photo_file_id:$('Normalize WOMAN Input').item.json.photo_file_id})}}"
+        }
       }
     },
     {
@@ -86,7 +132,10 @@
       "name": "DeepSeek Structured Extraction",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [880, 420],
+      "position": [
+        880,
+        420
+      ],
       "parameters": {
         "method": "POST",
         "url": "={{$env.DEEPSEEK_API_URL}}",
@@ -107,25 +156,35 @@
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{JSON.stringify({model:$env.DEEPSEEK_MODEL||'deepseek-chat',response_format:{type:'json_object'},messages:[{role:'system',content:'Extract only explicitly stated WOMAN profile data. Allowed scalar keys: name, age, city, district, height_cm, weight_kg, breast_size, description. Never infer. Existing prices and meeting places are supplied with IDs. Return strict JSON {fields:{},price_operations:[],meeting_place_operations:[],clarification:null}. Each collection operation is APPEND with full fields, UPDATE with existing id and full fields, or DELETE with existing id. Never replace a collection implicitly. Ambiguous breast size must produce clarification.'},{role:'user',content:JSON.stringify({message:$('Normalize WOMAN Input').item.json.text,existing_state:$('Load WOMAN Draft Session').item.json.existing_state})}]})}}",
-        "options": {}
-      }
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueErrorOutput"
     },
     {
       "id": "wf03-validate",
       "name": "Validate AI Extraction",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1100, 420],
+      "position": [
+        1100,
+        420
+      ],
       "parameters": {
         "jsCode": "const raw=$json.choices?.[0]?.message?.content??$json; const out=typeof raw==='string'?JSON.parse(raw):raw; const allowed=new Set(['name','age','city','district','height_cm','weight_kg','breast_size','description']); const fields={}; for(const [k,v] of Object.entries(out.fields||{})){if(allowed.has(k)&&v!==null&&v!=='')fields[k]=v;} if(fields.age!==undefined&&(Number(fields.age)<18||Number(fields.age)>100))throw new Error('Invalid age'); if(fields.height_cm!==undefined&&(Number(fields.height_cm)<100||Number(fields.height_cm)>250))throw new Error('Invalid height'); if(fields.weight_kg!==undefined&&(Number(fields.weight_kg)<30||Number(fields.weight_kg)>300))throw new Error('Invalid weight'); if(fields.breast_size!==undefined&&(Number(fields.breast_size)<0||Number(fields.breast_size)>20))throw new Error('Invalid breast size'); const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i; const op=(x)=>String(x.operation||'APPEND').toUpperCase(); const rawPrices=Array.isArray(out.price_operations)?out.price_operations:(Array.isArray(out.prices)?out.prices.map(x=>({...x,operation:'APPEND'})):[]); const price_operations=rawPrices.map(p=>{const operation=op(p),id=p.id==null?null:String(p.id);if(!['APPEND','UPDATE','DELETE'].includes(operation))throw new Error('Invalid price operation');if(operation!=='APPEND'&&!uuid.test(id||''))throw new Error('Price id required');if(operation==='DELETE')return{operation,id};const amount=Number(p.amount),service_name=String(p.service_name||'').trim(),currency=String(p.currency||'RUB').toUpperCase();if(!service_name||!Number.isFinite(amount)||amount<0||!/^[A-Z]{3}$/.test(currency))throw new Error('Invalid price');return{operation,id,service_name,amount,currency,duration_minutes:p.duration_minutes==null?null:Number(p.duration_minutes),description:p.description==null?null:String(p.description)};}); const placeTypes=new Set(['HER_PLACE','HIS_PLACE','HOTEL','PUBLIC_PLACE','OTHER']); const rawPlaces=Array.isArray(out.meeting_place_operations)?out.meeting_place_operations:(Array.isArray(out.meeting_places)?out.meeting_places.map(x=>({...x,operation:'APPEND'})):[]); const meeting_place_operations=rawPlaces.map(p=>{const operation=op(p),id=p.id==null?null:String(p.id);if(!['APPEND','UPDATE','DELETE'].includes(operation))throw new Error('Invalid place operation');if(operation!=='APPEND'&&!uuid.test(id||''))throw new Error('Place id required');if(operation==='DELETE')return{operation,id};const place_type=String(p.place_type||'').toUpperCase(),label=String(p.label||'').trim();if(!placeTypes.has(place_type)||!label)throw new Error('Invalid meeting place');return{operation,id,place_type,label,district:p.district==null?null:String(p.district),description:p.description==null?null:String(p.description)};}); return [{json:{payload_json:JSON.stringify({fields,price_operations,meeting_place_operations,clarification:out.clarification||null}),session_id:$('Load WOMAN Draft Session').item.json.session_id,profile_id:$('Load WOMAN Draft Session').item.json.profile_id}}];"
-      }
+      },
+      "onError": "continueErrorOutput"
     },
     {
       "id": "wf03-persist",
       "name": "Persist WOMAN Extraction",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [1320, 420],
+      "position": [
+        1320,
+        420
+      ],
       "credentials": {
         "postgres": {
           "id": "POSTGRES_PLACEHOLDER",
@@ -135,7 +194,9 @@
       "parameters": {
         "operation": "executeQuery",
         "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'profile_id')::uuid profile_id,(data->>'session_id')::uuid session_id,(data->>'payload')::jsonb payload FROM bind),\nprofile_guard AS (SELECT pg_advisory_xact_lock(hashtext(input.profile_id::text)) FROM input),\nupdated_profile AS (\n UPDATE profiles p SET name=COALESCE(input.payload->'fields'->>'name',p.name),age=COALESCE((input.payload->'fields'->>'age')::int,p.age),city=COALESCE(input.payload->'fields'->>'city',p.city),city_normalized=COALESCE(normalize_city_name(input.payload->'fields'->>'city'),p.city_normalized),district=COALESCE(input.payload->'fields'->>'district',p.district),height_cm=COALESCE((input.payload->'fields'->>'height_cm')::smallint,p.height_cm),weight_kg=COALESCE((input.payload->'fields'->>'weight_kg')::numeric,p.weight_kg),breast_size=COALESCE((input.payload->'fields'->>'breast_size')::numeric,p.breast_size),description=COALESCE(input.payload->'fields'->>'description',p.description),updated_at=now()\n FROM input,profile_guard WHERE p.id=input.profile_id RETURNING p.id\n),\nprice_ops AS (\n SELECT upper(x.value->>'operation') operation,NULLIF(x.value->>'id','')::uuid id,x.value->>'service_name' service_name,(x.value->>'amount')::numeric amount,upper(COALESCE(x.value->>'currency','RUB')) currency,(x.value->>'duration_minutes')::int duration_minutes,x.value->>'description' description,x.ord\n FROM input,profile_guard CROSS JOIN LATERAL jsonb_array_elements(COALESCE(input.payload->'price_operations','[]'::jsonb)) WITH ORDINALITY AS x(value,ord)\n),\nprice_append_unique AS (\n SELECT DISTINCT ON (lower(service_name),amount,currency,COALESCE(duration_minutes,-1),COALESCE(description,'')) * FROM price_ops WHERE operation='APPEND' ORDER BY lower(service_name),amount,currency,COALESCE(duration_minutes,-1),COALESCE(description,''),ord\n),\nprice_append AS (\n SELECT p.*,row_number() OVER(ORDER BY p.ord)-1 append_offset FROM price_append_unique p,input WHERE NOT EXISTS(SELECT 1 FROM profile_prices e WHERE e.profile_id=input.profile_id AND e.is_active AND lower(e.service_name)=lower(p.service_name) AND e.amount=p.amount AND e.currency=p.currency AND e.duration_minutes IS NOT DISTINCT FROM p.duration_minutes AND e.description IS NOT DISTINCT FROM p.description)\n),\nprice_max AS (SELECT COALESCE(MAX(e.position),-1) max_position FROM profile_prices e,input,profile_guard WHERE e.profile_id=input.profile_id),\nprice_inserted AS (\n INSERT INTO profile_prices(profile_id,service_name,amount,currency,duration_minutes,description,position) SELECT input.profile_id,p.service_name,p.amount,p.currency,p.duration_minutes,p.description,price_max.max_position+1+p.append_offset FROM input,price_append p,price_max ON CONFLICT DO NOTHING RETURNING id\n),\nprice_updated AS (\n UPDATE profile_prices e SET service_name=p.service_name,amount=p.amount,currency=p.currency,duration_minutes=p.duration_minutes,description=p.description,updated_at=now() FROM price_ops p,input WHERE p.operation='UPDATE' AND p.id=e.id AND e.profile_id=input.profile_id RETURNING e.id\n),\nprice_deleted AS (\n UPDATE profile_prices e SET is_active=false,updated_at=now() FROM price_ops p,input WHERE p.operation='DELETE' AND p.id=e.id AND e.profile_id=input.profile_id AND e.is_active RETURNING e.id\n),\nplace_ops AS (\n SELECT upper(x.value->>'operation') operation,NULLIF(x.value->>'id','')::uuid id,upper(x.value->>'place_type') place_type,x.value->>'label' label,x.value->>'district' district,x.value->>'description' description,x.ord FROM input,profile_guard CROSS JOIN LATERAL jsonb_array_elements(COALESCE(input.payload->'meeting_place_operations','[]'::jsonb)) WITH ORDINALITY AS x(value,ord)\n),\nplace_append_unique AS (\n SELECT DISTINCT ON (place_type,lower(label),COALESCE(district,''),COALESCE(description,'')) * FROM place_ops WHERE operation='APPEND' ORDER BY place_type,lower(label),COALESCE(district,''),COALESCE(description,''),ord\n),\nplace_append AS (\n SELECT p.*,row_number() OVER(ORDER BY p.ord)-1 append_offset FROM place_append_unique p,input WHERE NOT EXISTS(SELECT 1 FROM profile_meeting_places e WHERE e.profile_id=input.profile_id AND e.is_active AND e.place_type=p.place_type AND lower(e.label)=lower(p.label) AND e.district IS NOT DISTINCT FROM p.district AND e.description IS NOT DISTINCT FROM p.description)\n),\nplace_max AS (SELECT COALESCE(MAX(e.position),-1) max_position FROM profile_meeting_places e,input,profile_guard WHERE e.profile_id=input.profile_id),\nplace_inserted AS (\n INSERT INTO profile_meeting_places(profile_id,place_type,label,district,description,position) SELECT input.profile_id,p.place_type,p.label,p.district,p.description,place_max.max_position+1+p.append_offset FROM input,place_append p,place_max ON CONFLICT DO NOTHING RETURNING id\n),\nplace_updated AS (\n UPDATE profile_meeting_places e SET place_type=p.place_type,label=p.label,district=p.district,description=p.description,updated_at=now() FROM place_ops p,input WHERE p.operation='UPDATE' AND p.id=e.id AND e.profile_id=input.profile_id RETURNING e.id\n),\nplace_deleted AS (\n UPDATE profile_meeting_places e SET is_active=false,updated_at=now() FROM place_ops p,input WHERE p.operation='DELETE' AND p.id=e.id AND e.profile_id=input.profile_id AND e.is_active RETURNING e.id\n),\ncontext AS (\n UPDATE profile_ai_sessions s SET ai_context=COALESCE(s.ai_context,'{}'::jsonb)||jsonb_build_object('last_extraction',(SELECT payload FROM input)),updated_at=now() FROM input,profile_guard WHERE s.id=input.session_id AND s.profile_id=input.profile_id AND s.status='IN_PROGRESS' RETURNING s.id\n)\nSELECT (SELECT id::text FROM updated_profile) profile_id,(SELECT id::text FROM context) session_id,(SELECT count(*) FROM price_inserted) prices_appended,(SELECT count(*) FROM price_updated) prices_updated,(SELECT count(*) FROM price_deleted) prices_deleted,(SELECT count(*) FROM place_inserted) places_appended,(SELECT count(*) FROM place_updated) places_updated,(SELECT count(*) FROM place_deleted) places_deleted;",
-        "options": {"queryReplacement": "={{JSON.stringify({profile_id:$json.profile_id,session_id:$json.session_id,payload:$json.payload_json})}}"}
+        "options": {
+          "queryReplacement": "={{JSON.stringify({profile_id:$json.profile_id,session_id:$json.session_id,payload:$json.payload_json})}}"
+        }
       }
     },
     {
@@ -143,7 +204,10 @@
       "name": "Load WOMAN Completeness",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [1540, 300],
+      "position": [
+        1540,
+        300
+      ],
       "credentials": {
         "postgres": {
           "id": "POSTGRES_PLACEHOLDER",
@@ -153,7 +217,9 @@
       "parameters": {
         "operation": "executeQuery",
         "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'session_id')::uuid session_id FROM bind)\nSELECT p.id::text profile_id,s.id::text session_id,p.name,p.age,p.city,p.city_normalized,p.district,p.height_cm,p.weight_kg,p.breast_size,p.description,\n (SELECT count(*) FROM profile_photos x WHERE x.profile_id=p.id) photo_count,\n (SELECT count(*) FROM profile_prices x WHERE x.profile_id=p.id AND x.is_active) price_count,\n (SELECT count(*) FROM profile_meeting_places x WHERE x.profile_id=p.id AND x.is_active) meeting_place_count\nFROM input JOIN profile_ai_sessions s ON s.id=input.session_id JOIN profiles p ON p.id=s.profile_id\nWHERE s.id=input.session_id AND s.status='IN_PROGRESS';",
-        "options": {"queryReplacement": "={{JSON.stringify({session_id:$('Load WOMAN Draft Session').item.json.session_id})}}"}
+        "options": {
+          "queryReplacement": "={{JSON.stringify({session_id:$('Load WOMAN Draft Session').item.json.session_id})}}"
+        }
       }
     },
     {
@@ -161,7 +227,10 @@
       "name": "Determine Next WOMAN Block",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1760, 300],
+      "position": [
+        1760,
+        300
+      ],
       "parameters": {
         "jsCode": "const x=$json; const checks=[['name',x.name],['age',x.age],['city',x.city_normalized],['district',x.district],['height',x.height_cm],['weight',x.weight_kg],['breast_size',x.breast_size],['description',x.description],['photos',Number(x.photo_count)>0],['prices',Number(x.price_count)>0],['meeting_places',Number(x.meeting_place_count)>0]]; const i=checks.findIndex(([,v])=>v===null||v===undefined||v===''||v===false); const questions={name:'Как тебя зовут?',age:'Сколько тебе лет?',city:'В каком городе ты живёшь?',district:'Какой район?',height:'Какой у тебя рост в сантиметрах?',weight:'Какой вес в килограммах?',breast_size:'Укажи числовой размер груди.',description:'Расскажи о себе.',photos:'Добавь хотя бы одно фото.',prices:'Укажи цены.',meeting_places:'Укажи места встречи.'}; return [{json:{...x,complete:i<0,current_step:i<0?checks.length:i,next_block:i<0?null:checks[i][0],question:i<0?null:questions[checks[i][0]]}}];"
       }
@@ -171,7 +240,10 @@
       "name": "Save Derived WOMAN Cursor",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [1980, 300],
+      "position": [
+        1980,
+        300
+      ],
       "credentials": {
         "postgres": {
           "id": "POSTGRES_PLACEHOLDER",
@@ -181,7 +253,9 @@
       "parameters": {
         "operation": "executeQuery",
         "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'session_id')::uuid session_id,(data->>'current_step')::int current_step,(data->>'complete')::boolean complete FROM bind)\nUPDATE profile_ai_sessions s SET current_step=input.current_step,updated_at=now() FROM input WHERE s.id=input.session_id AND s.status='IN_PROGRESS' RETURNING s.id::text,input.complete;",
-        "options": {"queryReplacement": "={{JSON.stringify({session_id:$json.session_id,current_step:$json.current_step,complete:$json.complete})}}"}
+        "options": {
+          "queryReplacement": "={{JSON.stringify({session_id:$json.session_id,current_step:$json.current_step,complete:$json.complete})}}"
+        }
       }
     },
     {
@@ -189,7 +263,10 @@
       "name": "WOMAN Profile Complete",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [2200, 300],
+      "position": [
+        2200,
+        300
+      ],
       "parameters": {
         "conditions": {
           "boolean": [
@@ -206,7 +283,10 @@
       "name": "Finalize WOMAN Profile",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [2420, 180],
+      "position": [
+        2420,
+        180
+      ],
       "credentials": {
         "postgres": {
           "id": "POSTGRES_PLACEHOLDER",
@@ -215,8 +295,10 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'session_id')::uuid session_id FROM bind),\ncompleted AS (UPDATE profile_ai_sessions SET status='COMPLETED',updated_at=now() FROM input WHERE id=input.session_id AND status='IN_PROGRESS' RETURNING user_id,profile_id),\nprofile AS (UPDATE profiles p SET status='PENDING_MODERATION',updated_at=now() FROM completed c WHERE p.id=c.profile_id RETURNING p.id),\nmoderation AS (INSERT INTO profile_moderation(profile_id,moderator_type,status) SELECT id,'AI','PENDING' FROM profile WHERE NOT EXISTS(SELECT 1 FROM profile_moderation m WHERE m.profile_id=profile.id AND m.status='PENDING') RETURNING id),\naudit AS (INSERT INTO audit_events(user_id,event_type,event_data) SELECT c.user_id,'profile_created',jsonb_build_object('profile_id',c.profile_id) FROM completed c WHERE NOT EXISTS(SELECT 1 FROM audit_events a WHERE a.event_type='profile_created' AND a.event_data->>'profile_id'=c.profile_id::text) RETURNING id)\nSELECT profile.id::text profile_id,'Спасибо! Анкета отправлена на модерацию.' message FROM profile;",
-        "options": {"queryReplacement": "={{JSON.stringify({session_id:$('Determine Next WOMAN Block').item.json.session_id})}}"}
+        "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'session_id')::uuid session_id FROM bind),\neligible AS (SELECT s.id session_id,s.user_id,s.profile_id FROM input JOIN profile_ai_sessions s ON s.id=input.session_id JOIN profiles p ON p.id=s.profile_id WHERE s.status='IN_PROGRESS' AND p.status='DRAFT' FOR UPDATE OF s,p),\nprofile AS (UPDATE profiles p SET status='PENDING_MODERATION',updated_at=now() FROM eligible e WHERE p.id=e.profile_id AND p.status='DRAFT' RETURNING p.id),\ncompleted AS (UPDATE profile_ai_sessions s SET status='COMPLETED',updated_at=now() FROM eligible e,profile p WHERE s.id=e.session_id AND s.profile_id=p.id AND s.status='IN_PROGRESS' RETURNING s.user_id,s.profile_id),\nmoderation AS (INSERT INTO profile_moderation(profile_id,moderator_type,status) SELECT c.profile_id,'AI','PENDING' FROM completed c WHERE NOT EXISTS(SELECT 1 FROM profile_moderation m WHERE m.profile_id=c.profile_id AND m.status='PENDING') RETURNING id),\naudit AS (INSERT INTO audit_events(user_id,event_type,event_data) SELECT c.user_id,'profile_created',jsonb_build_object('profile_id',c.profile_id) FROM completed c WHERE NOT EXISTS(SELECT 1 FROM audit_events a WHERE a.event_type='profile_created' AND a.event_data->>'profile_id'=c.profile_id::text) RETURNING id)\nSELECT completed.profile_id IS NOT NULL ok,completed.profile_id::text,CASE WHEN completed.profile_id IS NOT NULL THEN 'Спасибо! Анкета отправлена на модерацию.' ELSE 'Состояние анкеты изменилось. Нажмите /start.' END message,CASE WHEN completed.profile_id IS NULL THEN 'WOMAN_FINALIZATION_NOT_AVAILABLE' END code FROM input LEFT JOIN completed ON true;",
+        "options": {
+          "queryReplacement": "={{JSON.stringify({session_id:$('Determine Next WOMAN Block').item.json.session_id})}}"
+        }
       }
     },
     {
@@ -224,7 +306,10 @@
       "name": "Prepare WOMAN Question",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [2420, 420],
+      "position": [
+        2420,
+        420
+      ],
       "parameters": {
         "assignments": {
           "assignments": [
@@ -238,11 +323,27 @@
       }
     },
     {
+      "id": "wf03-processing-error",
+      "name": "Prepare WOMAN Processing Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        600
+      ],
+      "parameters": {
+        "jsCode": "return [{json:{ok:false,code:'WOMAN_PROCESSING_UNAVAILABLE',message:'Не удалось обработать ответ. Попробуйте ещё раз.'}}];"
+      }
+    },
+    {
       "id": "wf03-response",
       "name": "Respond WOMAN Flow",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
-      "position": [2640, 300],
+      "position": [
+        2640,
+        300
+      ],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{$json}}",
@@ -251,20 +352,217 @@
     }
   ],
   "connections": {
-    "WOMAN Profile Webhook": {"main": [[{"node": "Normalize WOMAN Input", "type": "main", "index": 0}]]},
-    "Normalize WOMAN Input": {"main": [[{"node": "Load WOMAN Draft Session", "type": "main", "index": 0}]]},
-    "Load WOMAN Draft Session": {"main": [[{"node": "Is Photo", "type": "main", "index": 0}]]},
-    "Is Photo": {"main": [[{"node": "Save WOMAN Photo", "type": "main", "index": 0}], [{"node": "DeepSeek Structured Extraction", "type": "main", "index": 0}]]},
-    "Save WOMAN Photo": {"main": [[{"node": "Load WOMAN Completeness", "type": "main", "index": 0}]]},
-    "DeepSeek Structured Extraction": {"main": [[{"node": "Validate AI Extraction", "type": "main", "index": 0}]]},
-    "Validate AI Extraction": {"main": [[{"node": "Persist WOMAN Extraction", "type": "main", "index": 0}]]},
-    "Persist WOMAN Extraction": {"main": [[{"node": "Load WOMAN Completeness", "type": "main", "index": 0}]]},
-    "Load WOMAN Completeness": {"main": [[{"node": "Determine Next WOMAN Block", "type": "main", "index": 0}]]},
-    "Determine Next WOMAN Block": {"main": [[{"node": "Save Derived WOMAN Cursor", "type": "main", "index": 0}]]},
-    "Save Derived WOMAN Cursor": {"main": [[{"node": "WOMAN Profile Complete", "type": "main", "index": 0}]]},
-    "WOMAN Profile Complete": {"main": [[{"node": "Finalize WOMAN Profile", "type": "main", "index": 0}], [{"node": "Prepare WOMAN Question", "type": "main", "index": 0}]]},
-    "Finalize WOMAN Profile": {"main": [[{"node": "Respond WOMAN Flow", "type": "main", "index": 0}]]},
-    "Prepare WOMAN Question": {"main": [[{"node": "Respond WOMAN Flow", "type": "main", "index": 0}]]}
+    "WOMAN Profile Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize WOMAN Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize WOMAN Input": {
+      "main": [
+        [
+          {
+            "node": "Load WOMAN Draft Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load WOMAN Draft Session": {
+      "main": [
+        [
+          {
+            "node": "WOMAN Session Available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WOMAN Session Available": {
+      "main": [
+        [
+          {
+            "node": "Is Photo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond WOMAN Flow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Photo": {
+      "main": [
+        [
+          {
+            "node": "Save WOMAN Photo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DeepSeek Structured Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save WOMAN Photo": {
+      "main": [
+        [
+          {
+            "node": "Load WOMAN Completeness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Structured Extraction": {
+      "main": [
+        [
+          {
+            "node": "Validate AI Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare WOMAN Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate AI Extraction": {
+      "main": [
+        [
+          {
+            "node": "Persist WOMAN Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare WOMAN Processing Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist WOMAN Extraction": {
+      "main": [
+        [
+          {
+            "node": "Load WOMAN Completeness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load WOMAN Completeness": {
+      "main": [
+        [
+          {
+            "node": "Determine Next WOMAN Block",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Next WOMAN Block": {
+      "main": [
+        [
+          {
+            "node": "Save Derived WOMAN Cursor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Derived WOMAN Cursor": {
+      "main": [
+        [
+          {
+            "node": "WOMAN Profile Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WOMAN Profile Complete": {
+      "main": [
+        [
+          {
+            "node": "Finalize WOMAN Profile",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare WOMAN Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize WOMAN Profile": {
+      "main": [
+        [
+          {
+            "node": "Respond WOMAN Flow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare WOMAN Question": {
+      "main": [
+        [
+          {
+            "node": "Respond WOMAN Flow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare WOMAN Processing Error": {
+      "main": [
+        [
+          {
+            "node": "Respond WOMAN Flow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "meta": {
     "templateCredsSetupCompleted": false,

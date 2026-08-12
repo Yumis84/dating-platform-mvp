@@ -1,23 +1,42 @@
 {
   "name": "WF_01_USER_REGISTRATION_MAN_WOMAN_DEV",
   "active": false,
-  "settings": {"executionOrder": "v1"},
+  "settings": {
+    "executionOrder": "v1"
+  },
   "nodes": [
     {
       "id": "wf01-trigger",
       "name": "Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
       "typeVersion": 1.2,
-      "position": [0, 300],
-      "parameters": {"updates": ["message", "callback_query"], "additionalFields": {}},
-      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}}
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      }
     },
     {
       "id": "wf01-normalize",
       "name": "Normalize Telegram Event",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 300],
+      "position": [
+        220,
+        300
+      ],
       "parameters": {
         "jsCode": "const cb=$json.callback_query; const msg=$json.message; const from=cb?.from||msg?.from||{}; const data=String(cb?.data||''); const text=String(msg?.text||msg?.caption||'').trim(); const photos=Array.isArray(msg?.photo)?msg.photo:[]; const photo_file_id=photos.length?String(photos[photos.length-1].file_id||''):''; const isStart=/^\\/start(?:@[A-Za-z0-9_]+)?(?:\\s+.*)?$/.test(text); let action='UNKNOWN'; if(data==='role:man') action='ROLE_MAN'; else if(data==='role:woman') action='ROLE_WOMAN'; else if(data==='man_name:keep') action='MAN_NAME_KEEP'; else if(data==='man_name:change') action='MAN_NAME_CHANGE'; else if(data==='man_catalog:open') action='MAN_CATALOG'; else if(data==='man_preferences:open') action='MAN_PREFERENCES'; else if(data) action='UNKNOWN_CALLBACK'; else if(isStart) action='START'; else if(photo_file_id) action='PHOTO'; else if(text.startsWith('/')) action='UNKNOWN_COMMAND'; else if(text) action='TEXT'; return [{json:{telegram_id:String(from.id||''),telegram_first_name:String(from.first_name||'').trim(),username:String(from.username||''),chat_id:String(cb?.message?.chat?.id||msg?.chat?.id||from.id||''),callback_query_id:String(cb?.id||''),message_id:String(msg?.message_id||cb?.message?.message_id||''),action,text,photo_file_id}}];"
       }
@@ -27,12 +46,22 @@
       "name": "Register or Resolve Telegram User",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [440, 300],
-      "credentials": {"postgres": {"id": "POSTGRES_PLACEHOLDER", "name": "POSTGRES_PLACEHOLDER"}},
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
       "parameters": {
         "operation": "executeQuery",
         "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (\n SELECT (data->>'telegram_id')::bigint telegram_id,NULLIF(btrim(data->>'username'),'') username,data->>'action' action,NULLIF(btrim(data->>'first_name'),'') first_name,NULLIF(btrim(data->>'answer'),'') answer FROM bind\n),\ntelegram_lock AS (SELECT pg_advisory_xact_lock(input.telegram_id) FROM input),\nexisting_account AS (\n SELECT ta.user_id FROM telegram_accounts ta CROSS JOIN input CROSS JOIN telegram_lock WHERE ta.telegram_id=input.telegram_id\n),\ncreated_user AS (\n INSERT INTO users(role) SELECT NULL FROM input CROSS JOIN telegram_lock WHERE NOT EXISTS(SELECT 1 FROM existing_account) RETURNING id\n),\ncreated_account AS (\n INSERT INTO telegram_accounts(user_id,telegram_id,username) SELECT created_user.id,input.telegram_id,input.username FROM created_user CROSS JOIN input RETURNING user_id\n),\nresolved AS (SELECT user_id FROM existing_account UNION ALL SELECT user_id FROM created_account),\nusername_update AS (\n UPDATE telegram_accounts ta SET username=input.username FROM input,resolved WHERE ta.telegram_id=input.telegram_id AND ta.user_id=resolved.user_id AND ta.username IS DISTINCT FROM input.username RETURNING ta.user_id\n)\nSELECT resolved.user_id::text,input.action,input.first_name,input.answer,input.username,EXISTS(SELECT 1 FROM created_account) AS is_new\nFROM resolved CROSS JOIN input;",
-        "options": {"queryReplacement": "={{JSON.stringify({telegram_id:$json.telegram_id,username:$json.username,action:$json.action,first_name:$json.telegram_first_name,answer:$json.text})}}"}
+        "options": {
+          "queryReplacement": "={{JSON.stringify({telegram_id:$json.telegram_id,username:$json.username,action:$json.action,first_name:$json.telegram_first_name,answer:$json.text})}}"
+        }
       }
     },
     {
@@ -40,12 +69,22 @@
       "name": "Apply Role and Onboarding Event",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [440, 300],
-      "credentials": {"postgres": {"id": "POSTGRES_PLACEHOLDER", "name": "POSTGRES_PLACEHOLDER"}},
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'user_id')::uuid user_id,data->>'action' action,NULLIF(btrim(data->>'first_name'),'') first_name,NULLIF(btrim(data->>'answer'),'') answer FROM bind),\nuser_guard AS (SELECT pg_advisory_xact_lock(hashtext(input.user_id::text)) FROM input),\nuser_before AS (SELECT u.id,u.role FROM users u CROSS JOIN input CROSS JOIN user_guard WHERE u.id=input.user_id),\nrequested AS (SELECT input.*,CASE input.action WHEN 'ROLE_MAN' THEN 'man' WHEN 'ROLE_WOMAN' THEN 'woman' END requested_role FROM input),\nrole_update AS (\n UPDATE users u SET role=requested.requested_role,updated_at=now() FROM requested,user_before WHERE u.id=user_before.id AND user_before.role IS NULL AND requested.requested_role IS NOT NULL RETURNING u.id,u.role\n),\neffective_user AS (\n SELECT id,role FROM role_update UNION ALL SELECT id,role FROM user_before WHERE NOT EXISTS(SELECT 1 FROM role_update)\n),\ndecision AS (\n SELECT CASE WHEN requested.requested_role IS NULL THEN 'NO_ROLE_EVENT' WHEN user_before.role IS NULL THEN 'ACCEPTED' WHEN lower(user_before.role)=requested.requested_role THEN 'IDEMPOTENT' ELSE 'REJECTED' END role_decision\n FROM requested,user_before\n),\nman_seed AS (\n INSERT INTO male_search_context(user_id,name,onboarding_state)\n SELECT effective_user.id,requested.first_name,CASE WHEN requested.first_name IS NULL THEN 'AWAITING_MANUAL_NAME' ELSE 'AWAITING_NAME_CONFIRMATION' END\n FROM effective_user,requested,decision WHERE lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED'\n ON CONFLICT(user_id) DO NOTHING RETURNING user_id\n),\nman_change AS (\n UPDATE male_search_context c SET onboarding_state='AWAITING_MANUAL_NAME',name_source=NULL,name_confirmed_at=NULL,updated_at=now()\n FROM requested,effective_user,decision WHERE c.user_id=effective_user.id AND lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED' AND requested.action='MAN_NAME_CHANGE' AND c.onboarding_state IN ('AWAITING_NAME_CONFIRMATION','AWAITING_CITY') RETURNING c.user_id\n),\nman_keep AS (\n UPDATE male_search_context c SET name_source='TELEGRAM_CONFIRMED',name_confirmed_at=now(),onboarding_state='AWAITING_CITY',updated_at=now()\n FROM requested,effective_user,decision WHERE c.user_id=effective_user.id AND lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED' AND requested.action='MAN_NAME_KEEP' AND c.onboarding_state='AWAITING_NAME_CONFIRMATION' AND c.name IS NOT NULL RETURNING c.user_id\n),\nmanual_name AS (\n UPDATE male_search_context c SET name=requested.answer,name_source='MANUAL',name_confirmed_at=now(),onboarding_state='AWAITING_CITY',updated_at=now()\n FROM requested,effective_user,decision WHERE c.user_id=effective_user.id AND lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED' AND requested.action='TEXT' AND requested.answer IS NOT NULL AND c.onboarding_state='AWAITING_MANUAL_NAME' RETURNING c.user_id\n),\ncity_update AS (\n UPDATE male_search_context c SET city=requested.answer,city_normalized=normalize_city_name(requested.answer),onboarding_state='COMPLETED',updated_at=now()\n FROM requested,effective_user,decision WHERE c.user_id=effective_user.id AND lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED' AND requested.action='TEXT' AND requested.answer IS NOT NULL AND c.onboarding_state='AWAITING_CITY' RETURNING c.user_id\n),\nexisting_woman_profile AS (\n SELECT p.id,p.user_id FROM profiles p,effective_user WHERE p.user_id=effective_user.id AND p.status='DRAFT' ORDER BY p.created_at,p.id LIMIT 1\n),\nwoman_profile AS (\n INSERT INTO profiles(user_id,status)\n SELECT effective_user.id,'DRAFT' FROM effective_user,requested,decision WHERE lower(effective_user.role)='woman' AND decision.role_decision<>'REJECTED' AND requested.action IN ('ROLE_WOMAN','START','TEXT','PHOTO') AND NOT EXISTS(SELECT 1 FROM profiles p WHERE p.user_id=effective_user.id)\n ON CONFLICT DO NOTHING RETURNING id,user_id\n),\nprofile_choice AS (SELECT id,user_id FROM woman_profile UNION ALL SELECT id,user_id FROM existing_woman_profile WHERE NOT EXISTS(SELECT 1 FROM woman_profile)),\nwoman_session AS (\n INSERT INTO profile_ai_sessions(user_id,profile_id,current_step,ai_context,status)\n SELECT profile_choice.user_id,profile_choice.id,0,'{}'::jsonb,'IN_PROGRESS' FROM profile_choice,requested,decision WHERE decision.role_decision<>'REJECTED' AND requested.action IN ('ROLE_WOMAN','START','TEXT','PHOTO') AND NOT EXISTS(SELECT 1 FROM profile_ai_sessions s WHERE s.user_id=profile_choice.user_id AND s.status='IN_PROGRESS')\n ON CONFLICT DO NOTHING RETURNING id,user_id,profile_id\n),\nsession_choice AS (\n SELECT id,user_id,profile_id FROM woman_session UNION ALL SELECT s.id,s.user_id,s.profile_id FROM profile_ai_sessions s JOIN profile_choice p ON p.user_id=s.user_id WHERE s.status='IN_PROGRESS' AND NOT EXISTS(SELECT 1 FROM woman_session) ORDER BY id LIMIT 1\n)\nSELECT effective_user.id::text user_id,requested.action,decision.role_decision,effective_user.role,(SELECT id::text FROM profile_choice LIMIT 1) woman_profile_id,(SELECT id::text FROM session_choice LIMIT 1) woman_session_id\nFROM effective_user,requested,decision;",
-        "options": {"queryReplacement": "={{JSON.stringify({user_id:$json.user_id,action:$json.action,first_name:$json.first_name,answer:$json.answer})}}"}
+        "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'user_id')::uuid user_id,data->>'action' action,NULLIF(btrim(data->>'first_name'),'') first_name,NULLIF(btrim(data->>'answer'),'') answer FROM bind),\nuser_guard AS (SELECT pg_advisory_xact_lock(hashtext(input.user_id::text)) FROM input),\nuser_before AS (SELECT u.id,u.role FROM users u CROSS JOIN input CROSS JOIN user_guard WHERE u.id=input.user_id),\nrequested AS (SELECT input.*,CASE input.action WHEN 'ROLE_MAN' THEN 'man' WHEN 'ROLE_WOMAN' THEN 'woman' END requested_role FROM input),\nrole_update AS (\n UPDATE users u SET role=requested.requested_role,updated_at=now() FROM requested,user_before WHERE u.id=user_before.id AND user_before.role IS NULL AND requested.requested_role IS NOT NULL RETURNING u.id,u.role\n),\neffective_user AS (\n SELECT id,role FROM role_update UNION ALL SELECT id,role FROM user_before WHERE NOT EXISTS(SELECT 1 FROM role_update)\n),\ndecision AS (\n SELECT CASE WHEN requested.requested_role IS NULL THEN 'NO_ROLE_EVENT' WHEN user_before.role IS NULL THEN 'ACCEPTED' WHEN lower(user_before.role)=requested.requested_role THEN 'IDEMPOTENT' ELSE 'REJECTED' END role_decision\n FROM requested,user_before\n),\nman_seed AS (\n INSERT INTO male_search_context(user_id,name,onboarding_state)\n SELECT effective_user.id,requested.first_name,CASE WHEN requested.first_name IS NULL THEN 'AWAITING_MANUAL_NAME' ELSE 'AWAITING_NAME_CONFIRMATION' END\n FROM effective_user,requested,decision WHERE lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED'\n ON CONFLICT(user_id) DO NOTHING RETURNING user_id\n),\nman_change AS (\n UPDATE male_search_context c SET onboarding_state='AWAITING_MANUAL_NAME',name_source=NULL,name_confirmed_at=NULL,updated_at=now()\n FROM requested,effective_user,decision WHERE c.user_id=effective_user.id AND lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED' AND requested.action='MAN_NAME_CHANGE' AND c.onboarding_state IN ('AWAITING_NAME_CONFIRMATION','AWAITING_CITY') RETURNING c.user_id\n),\nman_keep AS (\n UPDATE male_search_context c SET name_source='TELEGRAM_CONFIRMED',name_confirmed_at=now(),onboarding_state='AWAITING_CITY',updated_at=now()\n FROM requested,effective_user,decision WHERE c.user_id=effective_user.id AND lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED' AND requested.action='MAN_NAME_KEEP' AND c.onboarding_state='AWAITING_NAME_CONFIRMATION' AND c.name IS NOT NULL RETURNING c.user_id\n),\nmanual_name AS (\n UPDATE male_search_context c SET name=requested.answer,name_source='MANUAL',name_confirmed_at=now(),onboarding_state='AWAITING_CITY',updated_at=now()\n FROM requested,effective_user,decision WHERE c.user_id=effective_user.id AND lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED' AND requested.action='TEXT' AND requested.answer IS NOT NULL AND c.onboarding_state='AWAITING_MANUAL_NAME' RETURNING c.user_id\n),\ncity_update AS (\n UPDATE male_search_context c SET city=requested.answer,city_normalized=normalize_city_name(requested.answer),onboarding_state='COMPLETED',updated_at=now()\n FROM requested,effective_user,decision WHERE c.user_id=effective_user.id AND lower(effective_user.role)='man' AND decision.role_decision<>'REJECTED' AND requested.action='TEXT' AND requested.answer IS NOT NULL AND c.onboarding_state='AWAITING_CITY' RETURNING c.user_id\n),\nterminal_woman_profile AS (\n SELECT p.id,p.user_id,p.status FROM profiles p,effective_user WHERE p.user_id=effective_user.id AND p.status IN ('ACTIVE','PENDING_MODERATION','BLOCKED') ORDER BY CASE p.status WHEN 'ACTIVE' THEN 0 WHEN 'PENDING_MODERATION' THEN 1 WHEN 'BLOCKED' THEN 2 ELSE 3 END,p.updated_at DESC,p.id DESC LIMIT 1\n),\nexisting_woman_profile AS (\n SELECT p.id,p.user_id FROM profiles p,effective_user WHERE p.user_id=effective_user.id AND p.status='DRAFT' AND NOT EXISTS(SELECT 1 FROM terminal_woman_profile) ORDER BY p.created_at,p.id LIMIT 1\n),\nwoman_profile AS (\n INSERT INTO profiles(user_id,status)\n SELECT effective_user.id,'DRAFT' FROM effective_user,requested,decision WHERE lower(effective_user.role)='woman' AND decision.role_decision<>'REJECTED' AND requested.action IN ('ROLE_WOMAN','START','TEXT','PHOTO') AND NOT EXISTS(SELECT 1 FROM profiles p WHERE p.user_id=effective_user.id)\n ON CONFLICT DO NOTHING RETURNING id,user_id\n),\nprofile_choice AS (SELECT id,user_id FROM woman_profile UNION ALL SELECT id,user_id FROM existing_woman_profile WHERE NOT EXISTS(SELECT 1 FROM woman_profile)),\nwoman_session AS (\n INSERT INTO profile_ai_sessions(user_id,profile_id,current_step,ai_context,status)\n SELECT profile_choice.user_id,profile_choice.id,0,'{}'::jsonb,'IN_PROGRESS' FROM profile_choice,requested,decision WHERE decision.role_decision<>'REJECTED' AND requested.action IN ('ROLE_WOMAN','START','TEXT','PHOTO') AND NOT EXISTS(SELECT 1 FROM terminal_woman_profile) AND NOT EXISTS(SELECT 1 FROM profile_ai_sessions s WHERE s.user_id=profile_choice.user_id AND s.status='IN_PROGRESS')\n ON CONFLICT DO NOTHING RETURNING id,user_id,profile_id\n),\nsession_choice AS (\n SELECT id,user_id,profile_id FROM woman_session UNION ALL SELECT s.id,s.user_id,s.profile_id FROM profile_ai_sessions s JOIN profile_choice p ON p.user_id=s.user_id WHERE s.status='IN_PROGRESS' AND NOT EXISTS(SELECT 1 FROM woman_session) ORDER BY id LIMIT 1\n)\nSELECT effective_user.id::text user_id,requested.action,decision.role_decision,effective_user.role,(SELECT id::text FROM profile_choice LIMIT 1) woman_profile_id,(SELECT id::text FROM session_choice LIMIT 1) woman_session_id\nFROM effective_user,requested,decision;",
+        "options": {
+          "queryReplacement": "={{JSON.stringify({user_id:$json.user_id,action:$json.action,first_name:$json.first_name,answer:$json.answer})}}"
+        }
       }
     },
     {
@@ -53,12 +92,22 @@
       "name": "Reload Role State",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [550, 300],
-      "credentials": {"postgres": {"id": "POSTGRES_PLACEHOLDER", "name": "POSTGRES_PLACEHOLDER"}},
+      "position": [
+        550,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_PLACEHOLDER",
+          "name": "POSTGRES_PLACEHOLDER"
+        }
+      },
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'user_id')::uuid user_id,data->>'action' action,data->>'role_decision' role_decision FROM bind)\nSELECT u.id::text user_id,u.role,c.name,c.name_source,c.name_confirmed_at,c.city,c.city_normalized,c.onboarding_state,input.action,input.role_decision,ws.session_id::text woman_session_id,ws.profile_id::text woman_profile_id,ws.current_step woman_current_step,ws.profile_status woman_profile_status,ws.session_status woman_session_status,CASE WHEN ws.profile_status='ACTIVE' THEN 'ACTIVE' WHEN ws.profile_status='BLOCKED' THEN 'BLOCKED' WHEN ws.profile_status='PENDING_MODERATION' OR ws.session_status='COMPLETED' THEN 'PENDING_MODERATION' WHEN ws.profile_status='DRAFT' AND ws.session_status='IN_PROGRESS' THEN 'IN_PROGRESS' WHEN ws.profile_status='DRAFT' THEN 'DRAFT_WITHOUT_SESSION' END woman_state\nFROM input JOIN users u ON u.id=input.user_id\nLEFT JOIN male_search_context c ON c.user_id=u.id\nLEFT JOIN LATERAL (SELECT p.id profile_id,p.status profile_status,s.id session_id,s.current_step,s.status session_status FROM profiles p LEFT JOIN LATERAL (SELECT x.id,x.current_step,x.status,x.created_at FROM profile_ai_sessions x WHERE x.user_id=u.id AND x.profile_id=p.id ORDER BY CASE x.status WHEN 'IN_PROGRESS' THEN 0 WHEN 'COMPLETED' THEN 1 ELSE 2 END,x.created_at DESC,x.id DESC LIMIT 1) s ON true WHERE p.user_id=u.id ORDER BY CASE p.status WHEN 'DRAFT' THEN 0 WHEN 'PENDING_MODERATION' THEN 1 WHEN 'ACTIVE' THEN 2 WHEN 'BLOCKED' THEN 3 ELSE 4 END,p.updated_at DESC,p.id DESC LIMIT 1) ws ON true;",
-        "options": {"queryReplacement": "={{JSON.stringify({user_id:$json.user_id,action:$json.action,role_decision:$json.role_decision})}}"}
+        "query": "WITH bind AS (SELECT $1::jsonb data),\ninput AS (SELECT (data->>'user_id')::uuid user_id,data->>'action' action,data->>'role_decision' role_decision FROM bind)\nSELECT u.id::text user_id,u.role,c.name,c.name_source,c.name_confirmed_at,c.city,c.city_normalized,c.onboarding_state,input.action,input.role_decision,ws.session_id::text woman_session_id,ws.profile_id::text woman_profile_id,ws.current_step woman_current_step,ws.profile_status woman_profile_status,ws.session_status woman_session_status,CASE WHEN ws.profile_status='ACTIVE' THEN 'ACTIVE' WHEN ws.profile_status='PENDING_MODERATION' THEN 'PENDING_MODERATION' WHEN ws.profile_status='BLOCKED' THEN 'BLOCKED' WHEN ws.profile_status='DRAFT' AND ws.session_status='IN_PROGRESS' THEN 'IN_PROGRESS' WHEN ws.profile_status='DRAFT' THEN 'DRAFT_WITHOUT_SESSION' END woman_state\nFROM input JOIN users u ON u.id=input.user_id\nLEFT JOIN male_search_context c ON c.user_id=u.id\nLEFT JOIN LATERAL (SELECT p.id profile_id,p.status profile_status,s.id session_id,s.current_step,s.status session_status FROM profiles p LEFT JOIN LATERAL (SELECT x.id,x.current_step,x.status,x.created_at FROM profile_ai_sessions x WHERE x.user_id=u.id AND x.profile_id=p.id ORDER BY CASE x.status WHEN 'IN_PROGRESS' THEN 0 WHEN 'COMPLETED' THEN 1 ELSE 2 END,x.created_at DESC,x.id DESC LIMIT 1) s ON true WHERE p.user_id=u.id ORDER BY CASE p.status WHEN 'ACTIVE' THEN 0 WHEN 'PENDING_MODERATION' THEN 1 WHEN 'BLOCKED' THEN 2 WHEN 'DRAFT' THEN 3 ELSE 4 END,p.updated_at DESC,p.id DESC LIMIT 1) ws ON true;",
+        "options": {
+          "queryReplacement": "={{JSON.stringify({user_id:$json.user_id,action:$json.action,role_decision:$json.role_decision})}}"
+        }
       }
     },
     {
@@ -66,25 +115,65 @@
       "name": "Should Handoff WOMAN Event",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [660, 300],
-      "parameters": {"conditions": {"boolean": [{"value1": "={{$json.role === 'woman' && $json.woman_state === 'IN_PROGRESS' && ['TEXT','PHOTO'].includes($json.action) && Boolean($json.woman_session_id) && $json.role_decision !== 'REJECTED'}}", "value2": true}]}}
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.role === 'woman' && $json.woman_state === 'IN_PROGRESS' && ['TEXT','PHOTO'].includes($json.action) && Boolean($json.woman_session_id) && $json.role_decision !== 'REJECTED'}}",
+              "value2": true
+            }
+          ]
+        }
+      }
     },
     {
       "id": "wf01-wf03-call",
       "name": "Handoff WOMAN Event to WF_03",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [770, 180],
+      "position": [
+        770,
+        180
+      ],
       "parameters": {
         "method": "POST",
         "url": "={{$env.WF_03_TRIGGER_URL}}",
         "sendHeaders": true,
-        "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}]},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
         "body": "={{JSON.stringify({telegram_id:$('Normalize Telegram Event').item.json.telegram_id,chat_id:$('Normalize Telegram Event').item.json.chat_id,update_type:$('Normalize Telegram Event').item.json.action,message_text:$('Normalize Telegram Event').item.json.text||null,text:$('Normalize Telegram Event').item.json.text||null,photo_file_id:$('Normalize Telegram Event').item.json.photo_file_id||null,message_id:$('Normalize Telegram Event').item.json.message_id||null,user_id:$('Reload Role State').item.json.user_id,profile_id:$('Reload Role State').item.json.woman_profile_id,session_id:$('Reload Role State').item.json.woman_session_id})}}",
-        "options": {}
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WF03_HEADER_AUTH_PLACEHOLDER",
+          "name": "WF03_HEADER_AUTH_PLACEHOLDER"
+        }
       }
     },
     {
@@ -92,9 +181,25 @@
       "name": "Prepare WF_03 Reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 180],
+      "position": [
+        880,
+        180
+      ],
       "parameters": {
-        "jsCode": "const state=$('Reload Role State').item.json; const response=$json; const message=String(response.message||response.question||'Продолжаем заполнение анкеты.'); return [{json:{...state,message,reply_kind:'PLAIN'}}];"
+        "jsCode": "const state=$('Reload Role State').item.json; const envelope=$json; const status=Number(envelope.statusCode??200); const response=envelope.body??envelope; const valid=status>=200&&status<300&&response&&typeof response==='object'&&typeof response.message==='string'&&response.message.trim(); const message=valid?String(response.message):'Не удалось обработать ответ. Попробуйте ещё раз.'; return [{json:{...state,message,reply_kind:'PLAIN',handoff_ok:Boolean(valid)}}];"
+      }
+    },
+    {
+      "id": "wf01-wf03-fallback",
+      "name": "Prepare WF_03 Failure Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        40
+      ],
+      "parameters": {
+        "jsCode": "const state=$('Reload Role State').first().json; return [{json:{...state,message:'Не удалось обработать ответ. Попробуйте ещё раз.',reply_kind:'PLAIN',handoff_ok:false}}];"
       }
     },
     {
@@ -102,7 +207,10 @@
       "name": "Prepare Role-Specific Reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [770, 300],
+      "position": [
+        770,
+        300
+      ],
       "parameters": {
         "jsCode": "const s=$json; let message='',reply_kind='PLAIN'; if(s.role_decision==='REJECTED'){message='Роль уже выбрана и не может быть изменена в этом сценарии.';} else if(['UNKNOWN','UNKNOWN_CALLBACK','UNKNOWN_COMMAND'].includes(s.action)){message='Неизвестная команда.';} else if(!s.role){message='Добро пожаловать. Выберите роль.';reply_kind='ROLE_CHOICE';} else if(s.role==='woman'){if(s.woman_state==='PENDING_MODERATION'){message='Анкета заполнена и ожидает модерации.';} else if(s.woman_state==='ACTIVE'){message='Анкета активна. Можно перейти к доступным действиям.';} else if(s.woman_state==='BLOCKED'){message='Анкета заблокирована. Новый onboarding автоматически не запускается.';} else if(s.woman_state==='IN_PROGRESS'){const questions=['Как тебя зовут?','Сколько тебе лет?','В каком городе ты живёшь?','Какой район?','Какой у тебя рост в сантиметрах?','Какой вес в килограммах?','Укажи числовой размер груди.','Расскажи о себе.','Добавь хотя бы одно фото.','Укажи цены.','Укажи места встречи.'];message=questions[Number(s.woman_current_step)]||'Продолжаем заполнение WOMAN-анкеты.';} else {message='Не удалось определить состояние WOMAN-анкеты. Новый onboarding не запущен.';}} else if(s.onboarding_state==='AWAITING_NAME_CONFIRMATION'){message=`Ваше имя: ${s.name}`;reply_kind='NAME_CONFIRM';} else if(s.onboarding_state==='AWAITING_MANUAL_NAME'){message='Как вас зовут?';} else if(s.onboarding_state==='AWAITING_CITY'){message='В каком городе вы хотите смотреть анкеты?';} else if(s.onboarding_state==='COMPLETED'&&s.action==='MAN_CATALOG'){message='Открываем анкеты вашего города.';} else if(s.onboarding_state==='COMPLETED'&&s.action==='MAN_PREFERENCES'){message='Открываем настройки предпочтений.';} else if(s.onboarding_state==='COMPLETED'){message='Настройте предпочтения или перейдите в каталог.';reply_kind='CATALOG_CHOICE';} else {message='Не удалось определить текущий шаг. Нажмите /start.';} return [{json:{...s,message,reply_kind}}];"
       }
@@ -112,21 +220,63 @@
       "name": "Is Role Choice",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [990, 300],
-      "parameters": {"conditions": {"string": [{"value1": "={{$json.reply_kind}}", "operation": "equals", "value2": "ROLE_CHOICE"}]}}
+      "position": [
+        990,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.reply_kind}}",
+              "operation": "equals",
+              "value2": "ROLE_CHOICE"
+            }
+          ]
+        }
+      }
     },
     {
       "id": "wf01-send-role-choice",
       "name": "Send Role Choice",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1100, 80],
-      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
+      "position": [
+        1100,
+        80
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      },
       "parameters": {
         "chatId": "={{$('Normalize Telegram Event').item.json.chat_id}}",
         "text": "={{$json.message}}",
         "replyMarkup": "inlineKeyboard",
-        "inlineKeyboard": {"rows": [{"row": {"buttons": [{"text": "Мужчина", "additionalFields": {"callback_data": "role:man"}}, {"text": "Девушка", "additionalFields": {"callback_data": "role:woman"}}]}}]},
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Мужчина",
+                    "additionalFields": {
+                      "callback_data": "role:man"
+                    }
+                  },
+                  {
+                    "text": "Девушка",
+                    "additionalFields": {
+                      "callback_data": "role:woman"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
         "additionalFields": {}
       }
     },
@@ -135,21 +285,63 @@
       "name": "Is MAN Name Confirmation",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [880, 300],
-      "parameters": {"conditions": {"string": [{"value1": "={{$json.reply_kind}}", "operation": "equals", "value2": "NAME_CONFIRM"}]}}
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.reply_kind}}",
+              "operation": "equals",
+              "value2": "NAME_CONFIRM"
+            }
+          ]
+        }
+      }
     },
     {
       "id": "wf01-send-name-confirm",
       "name": "Send MAN Name Confirmation",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1100, 160],
-      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
+      "position": [
+        1100,
+        160
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      },
       "parameters": {
         "chatId": "={{$('Normalize Telegram Event').item.json.chat_id}}",
         "text": "={{$json.message}}",
         "replyMarkup": "inlineKeyboard",
-        "inlineKeyboard": {"rows": [{"row": {"buttons": [{"text": "Оставить", "additionalFields": {"callback_data": "man_name:keep"}}, {"text": "Изменить", "additionalFields": {"callback_data": "man_name:change"}}]}}]},
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Оставить",
+                    "additionalFields": {
+                      "callback_data": "man_name:keep"
+                    }
+                  },
+                  {
+                    "text": "Изменить",
+                    "additionalFields": {
+                      "callback_data": "man_name:change"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
         "additionalFields": {}
       }
     },
@@ -158,21 +350,63 @@
       "name": "Is MAN Catalog Choice",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1100, 380],
-      "parameters": {"conditions": {"string": [{"value1": "={{$json.reply_kind}}", "operation": "equals", "value2": "CATALOG_CHOICE"}]}}
+      "position": [
+        1100,
+        380
+      ],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.reply_kind}}",
+              "operation": "equals",
+              "value2": "CATALOG_CHOICE"
+            }
+          ]
+        }
+      }
     },
     {
       "id": "wf01-send-catalog-choice",
       "name": "Send MAN Catalog Choice",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1320, 320],
-      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
+      "position": [
+        1320,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      },
       "parameters": {
         "chatId": "={{$('Normalize Telegram Event').item.json.chat_id}}",
         "text": "={{$json.message}}",
         "replyMarkup": "inlineKeyboard",
-        "inlineKeyboard": {"rows": [{"row": {"buttons": [{"text": "Настроить предпочтения", "additionalFields": {"callback_data": "man_preferences:open"}}, {"text": "Смотреть анкеты", "additionalFields": {"callback_data": "man_catalog:open"}}]}}]},
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Настроить предпочтения",
+                    "additionalFields": {
+                      "callback_data": "man_preferences:open"
+                    }
+                  },
+                  {
+                    "text": "Смотреть анкеты",
+                    "additionalFields": {
+                      "callback_data": "man_catalog:open"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
         "additionalFields": {}
       }
     },
@@ -181,8 +415,16 @@
       "name": "Send Role-Specific Reply",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1320, 500],
-      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
+      "position": [
+        1320,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      },
       "parameters": {
         "chatId": "={{$('Normalize Telegram Event').item.json.chat_id}}",
         "text": "={{$json.message}}",
@@ -194,46 +436,299 @@
       "name": "Has Callback Query",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1210, 300],
-      "parameters": {"conditions": {"string": [{"value1": "={{$('Normalize Telegram Event').item.json.callback_query_id}}", "operation": "isNotEmpty"}]}}
+      "position": [
+        1210,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$('Normalize Telegram Event').item.json.callback_query_id}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      }
     },
     {
       "id": "wf01-ack",
       "name": "Answer Callback Query",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1430, 220],
-      "credentials": {"telegramApi": {"id": "TELEGRAM_PLACEHOLDER", "name": "TELEGRAM_PLACEHOLDER"}},
-      "parameters": {"resource": "callback", "queryId": "={{$('Normalize Telegram Event').item.json.callback_query_id}}", "additionalFields": {}}
+      "position": [
+        1430,
+        220
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_PLACEHOLDER",
+          "name": "TELEGRAM_PLACEHOLDER"
+        }
+      },
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{$('Normalize Telegram Event').item.json.callback_query_id}}",
+        "additionalFields": {}
+      }
     },
     {
       "id": "wf01-done",
       "name": "DEV Flow Complete",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [1430, 420],
+      "position": [
+        1430,
+        420
+      ],
       "parameters": {}
     }
   ],
   "connections": {
-    "Telegram Trigger": {"main": [[{"node": "Normalize Telegram Event", "type": "main", "index": 0}]]},
-    "Normalize Telegram Event": {"main": [[{"node": "Register or Resolve Telegram User", "type": "main", "index": 0}]]},
-    "Register or Resolve Telegram User": {"main": [[{"node": "Apply Role and Onboarding Event", "type": "main", "index": 0}]]},
-    "Apply Role and Onboarding Event": {"main": [[{"node": "Reload Role State", "type": "main", "index": 0}]]},
-    "Reload Role State": {"main": [[{"node": "Should Handoff WOMAN Event", "type": "main", "index": 0}]]},
-    "Should Handoff WOMAN Event": {"main": [[{"node": "Handoff WOMAN Event to WF_03", "type": "main", "index": 0}], [{"node": "Prepare Role-Specific Reply", "type": "main", "index": 0}]]},
-    "Handoff WOMAN Event to WF_03": {"main": [[{"node": "Prepare WF_03 Reply", "type": "main", "index": 0}]]},
-    "Prepare WF_03 Reply": {"main": [[{"node": "Is Role Choice", "type": "main", "index": 0}]]},
-    "Prepare Role-Specific Reply": {"main": [[{"node": "Is Role Choice", "type": "main", "index": 0}]]},
-    "Is Role Choice": {"main": [[{"node": "Send Role Choice", "type": "main", "index": 0}], [{"node": "Is MAN Name Confirmation", "type": "main", "index": 0}]]},
-    "Send Role Choice": {"main": [[{"node": "Has Callback Query", "type": "main", "index": 0}]]},
-    "Is MAN Name Confirmation": {"main": [[{"node": "Send MAN Name Confirmation", "type": "main", "index": 0}], [{"node": "Is MAN Catalog Choice", "type": "main", "index": 0}]]},
-    "Is MAN Catalog Choice": {"main": [[{"node": "Send MAN Catalog Choice", "type": "main", "index": 0}], [{"node": "Send Role-Specific Reply", "type": "main", "index": 0}]]},
-    "Send MAN Name Confirmation": {"main": [[{"node": "Has Callback Query", "type": "main", "index": 0}]]},
-    "Send MAN Catalog Choice": {"main": [[{"node": "Has Callback Query", "type": "main", "index": 0}]]},
-    "Send Role-Specific Reply": {"main": [[{"node": "Has Callback Query", "type": "main", "index": 0}]]},
-    "Has Callback Query": {"main": [[{"node": "Answer Callback Query", "type": "main", "index": 0}], [{"node": "DEV Flow Complete", "type": "main", "index": 0}]]}
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Telegram Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Telegram Event": {
+      "main": [
+        [
+          {
+            "node": "Register or Resolve Telegram User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register or Resolve Telegram User": {
+      "main": [
+        [
+          {
+            "node": "Apply Role and Onboarding Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Role and Onboarding Event": {
+      "main": [
+        [
+          {
+            "node": "Reload Role State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reload Role State": {
+      "main": [
+        [
+          {
+            "node": "Should Handoff WOMAN Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Handoff WOMAN Event": {
+      "main": [
+        [
+          {
+            "node": "Handoff WOMAN Event to WF_03",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Role-Specific Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handoff WOMAN Event to WF_03": {
+      "main": [
+        [
+          {
+            "node": "Prepare WF_03 Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare WF_03 Failure Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare WF_03 Reply": {
+      "main": [
+        [
+          {
+            "node": "Is Role Choice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Role-Specific Reply": {
+      "main": [
+        [
+          {
+            "node": "Is Role Choice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Role Choice": {
+      "main": [
+        [
+          {
+            "node": "Send Role Choice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is MAN Name Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Role Choice": {
+      "main": [
+        [
+          {
+            "node": "Has Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is MAN Name Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Send MAN Name Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is MAN Catalog Choice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is MAN Catalog Choice": {
+      "main": [
+        [
+          {
+            "node": "Send MAN Catalog Choice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Role-Specific Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send MAN Name Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Has Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send MAN Catalog Choice": {
+      "main": [
+        [
+          {
+            "node": "Has Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Role-Specific Reply": {
+      "main": [
+        [
+          {
+            "node": "Has Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Callback Query": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DEV Flow Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare WF_03 Failure Reply": {
+      "main": [
+        [
+          {
+            "node": "Is Role Choice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "meta": {"devOnly": true, "templateCredsSetupCompleted": false},
+  "meta": {
+    "devOnly": true,
+    "templateCredsSetupCompleted": false
+  },
   "id": "WF_01_USER_REGISTRATION_MAN_WOMAN_DEV"
 }

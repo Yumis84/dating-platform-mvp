@@ -6,7 +6,16 @@ Input: `telegram_id`, `chat_id`, `update_type`, `user_id`, `session_id`,
 `profile_id`, optional `message_text`, optional Telegram `photo_file_id`, and
 optional `message_id`.
 
-The caller must already have created an IN_PROGRESS WOMAN session linked to a DRAFT profile. WF_03 verifies WOMAN role when loading that session.
+The caller must already have created an IN_PROGRESS WOMAN session linked to a
+DRAFT profile. WF_03 verifies WOMAN role and the exact user/session/profile
+ownership tuple. Missing, stale, malformed, or mismatched identifiers produce
+one controlled `WOMAN_SESSION_NOT_AVAILABLE` response and cannot reach photo,
+AI, persistence, cursor, or finalization nodes.
+
+The inactive DEV webhook uses n8n Header Auth. WF_01 must bind the same
+DEV-only `httpHeaderAuth` credential through Generic Credential Type. The JSON
+contains only a credential placeholder, never a secret. This is a repository
+contract, not proof that a particular n8n runtime has imported or accepted it.
 
 Text and the existing structured profile state are sent to DeepSeek with a strict JSON contract. `Validate AI Extraction` permits only TZ #2 scalar fields and explicit collection operations:
 
@@ -31,6 +40,17 @@ name, age, city, district, height, weight, breast_size,
 description, >=1 photo, >=1 price, >=1 meeting place
 ```
 
-Finalization is a single PostgreSQL statement that completes the session, sets `PENDING_MODERATION`, creates one pending moderation row, and writes an idempotent audit event.
+Finalization is a single PostgreSQL statement guarded by both
+`profile.status = DRAFT` and `session.status = IN_PROGRESS`. A successful call
+completes the session, sets `PENDING_MODERATION`, creates one pending moderation
+row, and writes an idempotent audit event. A repeated or stale call returns a
+controlled no-op and creates no additional side effects.
 
-Before any future import, validate the exact n8n node versions, bind existing credentials explicitly, add error/retry routes, and repeat the disposable-DB integration test on a native PostgreSQL version matching the target environment.
+The DeepSeek call has a finite timeout. Transport errors and malformed model
+JSON route to `WOMAN_PROCESSING_UNAVAILABLE`; they do not reach persistence,
+cursor advancement, or finalization.
+
+Before any future import, validate the exact n8n node versions, bind DEV-only
+credentials explicitly, execute a real isolated HTTP Request -> Webhook test,
+and repeat the disposable-DB integration test on a native PostgreSQL version
+matching the target environment.

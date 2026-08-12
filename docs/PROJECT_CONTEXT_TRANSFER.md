@@ -579,3 +579,13 @@ This append-only entry records repository-only feature work in branch `agent/man
 - Repeated `/start` and `role:woman` after completion do not create a new DRAFT profile or IN_PROGRESS session and do not return the first WOMAN question.
 - Tests 14/15 verify only the WF_01/WF_03 payload/session contract. The real HTTP Request to Webhook handoff remains an unresolved runtime dependency until an isolated n8n DEV runtime is separately approved and available.
 - These are repository-only drafts. No workflow was imported, activated, or published, and no migration or shared/production database change was performed.
+
+## 2026-08-12 — Pre-runtime corrective gate
+
+- WF_03 now returns a controlled `WOMAN_SESSION_NOT_AVAILABLE` result for a missing, stale, malformed, or mismatched user/session/profile tuple. The invalid branch terminates before photo handling, DeepSeek, persistence, cursor changes, or finalization.
+- WF_01's WF_03 HTTP call and WF_03's DeepSeek call have finite timeouts and explicit error outputs. Transport failures, non-success HTTP envelopes, and malformed responses use the canonical retry message without advancing WOMAN state.
+- Terminal WOMAN profiles have explicit precedence over stale DRAFT profiles: ACTIVE, PENDING_MODERATION, and BLOCKED cannot create or resume a new DRAFT onboarding session.
+- Finalization is guarded by DRAFT profile plus IN_PROGRESS session and is a controlled no-op on a repeated/stale request; moderation and audit side effects originate only from the successful transition.
+- The inactive DEV WF_03 webhook requires an n8n Header Auth credential; WF_01 uses the matching Generic Credential Type placeholder. No credential secret is stored in the repository. Runtime import/binding remains separately gated.
+- Migration tests must use the exact disposable allowlist `001_users...`, `002`, `003`, `004`, `008`, draft `009`, draft `010`. Never execute a wildcard over `database/migrations`, and never include legacy `001_initial_users_schema.sql`.
+- Static and PGlite tests are repository evidence only. Real n8n HTTP handoff, imported credential compatibility, timeout/error behavior, and Telegram delivery remain unresolved runtime dependencies and require separate approval.

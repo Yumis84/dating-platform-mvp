@@ -51,9 +51,9 @@ node tests/runtime_product_flows.mjs
 git diff --check
 ```
 
-The runtime suite executes canonical migrations 001/002/003/004/008 plus draft
-009/010 in a new in-memory PostgreSQL-compatible database and then executes the
-actual SQL extracted from WF_01/WF_03/WF_05. It verifies the 28 acceptance
+The runtime suite executes an exact allowlist in a new in-memory
+PostgreSQL-compatible database and then executes the
+actual SQL extracted from WF_01/WF_03/WF_05. It verifies 31 acceptance
 scenarios: registration/idempotency, first-wins role, MAN state, START routing,
 WOMAN profile/session/lifecycle, collection append, concurrent photos, and catalog
 candidate/ranking invariants.
@@ -66,6 +66,47 @@ lookup contract. A real `HTTP Request -> WOMAN Profile Webhook` execution remain
 an unresolved runtime dependency because this repository environment has no
 isolated n8n DEV runtime, webhook base URL, or test credentials. It must run in an
 approved isolated n8n environment before the handoff can be marked runtime PASS.
+
+The automated suite now has 31 PGlite scenarios. In addition to the original
+product cases, it verifies that a missing/stale/wrong WOMAN session returns one
+controlled `WOMAN_SESSION_NOT_AVAILABLE` row without mutation, terminal WOMAN
+profiles outrank stale DRAFT rows, and finalization is a guarded one-time
+`DRAFT/IN_PROGRESS -> PENDING_MODERATION/COMPLETED` transition.
+
+## Migration execution safety
+
+Never execute `database/migrations/*.sql`, another wildcard, or a directory-wide
+migration loop. The repository contains the conflicting legacy
+`001_initial_users_schema.sql`, which must never be included.
+
+The only allowlist used by the disposable PGlite product test is, in this exact
+order:
+
+1. `001_users_and_telegram_accounts_schema.sql`
+2. `002_profiles_schema.sql`
+3. `003_moderation_schema.sql`
+4. `004_catalog_schema.sql`
+5. `008_audit_events_schema.sql`
+6. `009_woman_profile_tz02_schema.sql` — DRAFT, disposable test only
+7. `010_man_search_context_preferences_schema.sql` — DRAFT, disposable test only
+
+This list is not approval to apply any migration to shared, staging, or
+production databases. Migrations 009/010 remain unapplied drafts.
+
+## External-call and webhook gates
+
+Repository checks only validate the n8n JSON contract and topology. WF_01's
+HTTP Request has a finite timeout, treats non-2xx or malformed envelopes as a
+controlled failure, and routes transport errors to the same fallback response.
+WF_03's DeepSeek call has a finite timeout; transport and JSON-validation errors
+terminate through a controlled response before persistence/cursor/finalization.
+
+The inactive DEV WF_03 webhook is configured for n8n Header Auth. WF_01 refers
+to the matching `httpHeaderAuth` credential placeholder through Generic
+Credential Type. No secret value is stored in Git. Before any isolated runtime
+test, an operator must create/bind a DEV-only credential and confirm the target
+n8n build accepts this imported credential contract. An internet-visible
+unauthenticated webhook is not ready or permitted.
 
 All Postgres v2.6 workflow nodes use `parameters.options.queryReplacement` with
 one `JSON.stringify(...)` value bound to `$1::jsonb`; SQL extracts individual

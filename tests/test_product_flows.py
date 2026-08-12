@@ -136,6 +136,75 @@ class WorkflowStaticTests(unittest.TestCase):
         for key in ("telegram_id", "chat_id", "update_type", "message_text", "photo_file_id", "user_id", "profile_id", "session_id"):
             self.assertIn(key, handoff["parameters"]["body"])
 
+    def test_wf03_unavailable_session_has_controlled_terminal_path(self):
+        workflow = load_workflow(WORKFLOWS["wf03"])
+        nodes = {node["name"]: node for node in workflow["nodes"]}
+        load = nodes["Load WOMAN Draft Session"]
+        query = load["parameters"]["query"]
+        self.assertIn("LEFT JOIN chosen ON true", query)
+        self.assertIn("WOMAN_SESSION_NOT_AVAILABLE", query)
+        self.assertIn("session_available", query)
+        self.assertIn("WOMAN Session Available", nodes)
+        branches = workflow["connections"]["WOMAN Session Available"]["main"]
+        self.assertEqual(branches[0][0]["node"], "Is Photo")
+        self.assertEqual(branches[1][0]["node"], "Respond WOMAN Flow")
+
+    def test_external_calls_have_timeout_and_controlled_error_routes(self):
+        wf01 = load_workflow(WORKFLOWS["wf01"])
+        wf03 = load_workflow(WORKFLOWS["wf03"])
+        handoff = next(node for node in wf01["nodes"] if node["name"] == "Handoff WOMAN Event to WF_03")
+        self.assertGreater(handoff["parameters"]["options"]["timeout"], 0)
+        self.assertEqual(handoff["onError"], "continueErrorOutput")
+        self.assertTrue(handoff["parameters"]["options"]["response"]["response"]["neverError"])
+        self.assertEqual(
+            wf01["connections"][handoff["name"]]["main"][1][0]["node"],
+            "Prepare WF_03 Failure Reply",
+        )
+        failure = next(node for node in wf01["nodes"] if node["name"] == "Prepare WF_03 Failure Reply")
+        self.assertIn("Не удалось обработать ответ. Попробуйте ещё раз.", failure["parameters"]["jsCode"])
+        deepseek = next(node for node in wf03["nodes"] if node["name"] == "DeepSeek Structured Extraction")
+        validate = next(node for node in wf03["nodes"] if node["name"] == "Validate AI Extraction")
+        self.assertGreater(deepseek["parameters"]["options"]["timeout"], 0)
+        self.assertEqual(deepseek["onError"], "continueErrorOutput")
+        self.assertEqual(validate["onError"], "continueErrorOutput")
+        for source in (deepseek["name"], validate["name"]):
+            self.assertEqual(
+                wf03["connections"][source]["main"][1][0]["node"],
+                "Prepare WOMAN Processing Error",
+            )
+
+    def test_wf03_dev_webhook_uses_header_auth_credential_contract(self):
+        wf01 = load_workflow(WORKFLOWS["wf01"])
+        wf03 = load_workflow(WORKFLOWS["wf03"])
+        webhook = next(node for node in wf03["nodes"] if node["name"] == "WOMAN Profile Webhook")
+        handoff = next(node for node in wf01["nodes"] if node["name"] == "Handoff WOMAN Event to WF_03")
+        self.assertEqual(webhook["parameters"]["authentication"], "headerAuth")
+        self.assertEqual(handoff["parameters"]["authentication"], "genericCredentialType")
+        self.assertEqual(handoff["parameters"]["genericAuthType"], "httpHeaderAuth")
+        self.assertEqual(webhook["credentials"]["httpHeaderAuth"], handoff["credentials"]["httpHeaderAuth"])
+        self.assertIn("PLACEHOLDER", webhook["credentials"]["httpHeaderAuth"]["id"])
+
+    def test_terminal_woman_profiles_precede_stale_drafts(self):
+        workflow = load_workflow(WORKFLOWS["wf01"])
+        apply_query = next(node for node in workflow["nodes"] if node["name"] == "Apply Role and Onboarding Event")["parameters"]["query"]
+        reload_query = next(node for node in workflow["nodes"] if node["name"] == "Reload Role State")["parameters"]["query"]
+        self.assertIn("terminal_woman_profile", apply_query)
+        self.assertIn("NOT EXISTS(SELECT 1 FROM terminal_woman_profile)", apply_query)
+        active = reload_query.index("WHEN 'ACTIVE' THEN 0")
+        pending = reload_query.index("WHEN 'PENDING_MODERATION' THEN 1")
+        blocked = reload_query.index("WHEN 'BLOCKED' THEN 2")
+        draft = reload_query.index("WHEN 'DRAFT' THEN 3")
+        self.assertLess(active, pending)
+        self.assertLess(pending, blocked)
+        self.assertLess(blocked, draft)
+
+    def test_finalize_requires_draft_profile_and_in_progress_session(self):
+        workflow = load_workflow(WORKFLOWS["wf03"])
+        query = next(node for node in workflow["nodes"] if node["name"] == "Finalize WOMAN Profile")["parameters"]["query"]
+        self.assertIn("s.status='IN_PROGRESS'", query)
+        self.assertIn("p.status='DRAFT'", query)
+        self.assertIn("WOMAN_FINALIZATION_NOT_AVAILABLE", query)
+
     def test_woman_collection_and_photo_persistence_is_explicit(self):
         workflow = load_workflow(WORKFLOWS["wf03"])
         persist = next(node for node in workflow["nodes"] if node["name"] == "Persist WOMAN Extraction")

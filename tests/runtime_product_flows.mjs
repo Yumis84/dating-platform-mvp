@@ -307,7 +307,27 @@ await test(15, "WF_01 to WF_03 photo CONTRACT", async () => {
   return "CONTRACT only: PHOTO payload and resumable target agree; no HTTP execution";
 });
 
-await test(16, "prices append without silent overwrite", async () => {
+await test(16, "WF_03 missing/stale/wrong session returns controlled row without mutation", async () => {
+  const beforeProfiles = await count("profiles");
+  const beforeSessions = await count("profile_ai_sessions");
+  const cases = [
+    { user_id: null, session_id: null, profile_id: null },
+    { user_id: womanUserId, session_id: "00000000-0000-4000-8000-000000000001", profile_id: womanProfileId },
+    { user_id: manUserId, session_id: womanSessionId, profile_id: womanProfileId },
+  ];
+  for (const input of cases) {
+    const loaded = (await db.query(loadWomanSql, bind(input))).rows;
+    assert.equal(loaded.length, 1);
+    assert.equal(loaded[0].session_available, false);
+    assert.equal(loaded[0].code, "WOMAN_SESSION_NOT_AVAILABLE");
+    assert.ok(loaded[0].message);
+  }
+  assert.equal(await count("profiles"), beforeProfiles);
+  assert.equal(await count("profile_ai_sessions"), beforeSessions);
+  return "each invalid identity tuple returned one WOMAN_SESSION_NOT_AVAILABLE row; profile/session counts unchanged";
+});
+
+await test(17, "prices append without silent overwrite", async () => {
   const payload = (service_name, amount) => JSON.stringify({
     fields: {},
     price_operations: [{ operation: "APPEND", service_name, amount, currency: "RUB", duration_minutes: 60, description: null }],
@@ -333,7 +353,7 @@ await test(16, "prices append without silent overwrite", async () => {
   return "price A and B both active at positions 0 and 1; explicit UPDATE/DELETE also executed";
 });
 
-await test(17, "meeting places append without silent overwrite", async () => {
+await test(18, "meeting places append without silent overwrite", async () => {
   const payload = (label, place_type) => JSON.stringify({
     fields: {},
     price_operations: [],
@@ -359,7 +379,7 @@ await test(17, "meeting places append without silent overwrite", async () => {
   return "place A and B both active at positions 0 and 1; explicit UPDATE/DELETE also executed";
 });
 
-await test(18, "concurrent WOMAN photos are preserved and deduplicated", async () => {
+await test(19, "concurrent WOMAN photos are preserved and deduplicated", async () => {
   await Promise.all([
     db.query(savePhotoSql, bind({ profile_id: womanProfileId, photo_file_id: "tg-concurrent-A" })),
     db.query(savePhotoSql, bind({ profile_id: womanProfileId, photo_file_id: "tg-concurrent-B" })),
@@ -372,7 +392,7 @@ await test(18, "concurrent WOMAN photos are preserved and deduplicated", async (
   return "two distinct photos stored at distinct positions; repeated file_id deduplicated";
 });
 
-await test(19, "WF_03 cursor and finalization SQL completes WOMAN profile", async () => {
+await test(20, "WF_03 cursor and finalization SQL completes WOMAN profile exactly once", async () => {
   const completeness = (await db.query(completenessSql, bind({ session_id: womanSessionId }))).rows[0];
   assert.equal(completeness.session_id, womanSessionId);
   assert.equal(Number(completeness.photo_count), 2);
@@ -383,10 +403,17 @@ await test(19, "WF_03 cursor and finalization SQL completes WOMAN profile", asyn
   assert.equal(finalized.profile_id, womanProfileId);
   assert.equal((await rows("SELECT status FROM profiles WHERE id=$1::uuid", [womanProfileId]))[0].status, "PENDING_MODERATION");
   assert.equal((await rows("SELECT status FROM profile_ai_sessions WHERE id=$1::uuid", [womanSessionId]))[0].status, "COMPLETED");
-  return "actual completeness/cursor/finalization SQL set PENDING_MODERATION + COMPLETED";
+  const moderationCount = await count("profile_moderation", "profile_id=$1::uuid", [womanProfileId]);
+  const auditCount = await count("audit_events", "event_type='profile_created' AND event_data->>'profile_id'=$1", [womanProfileId]);
+  const repeated = (await db.query(finalizeWomanSql, bind({ session_id: womanSessionId }))).rows[0];
+  assert.equal(repeated.ok, false);
+  assert.equal(repeated.code, "WOMAN_FINALIZATION_NOT_AVAILABLE");
+  assert.equal(await count("profile_moderation", "profile_id=$1::uuid", [womanProfileId]), moderationCount);
+  assert.equal(await count("audit_events", "event_type='profile_created' AND event_data->>'profile_id'=$1", [womanProfileId]), auditCount);
+  return "first call transitioned DRAFT/IN_PROGRESS; repeated call was controlled no-op with no duplicate side effects";
 });
 
-await test(20, "completed WOMAN + /start returns PENDING_MODERATION response", async () => {
+await test(21, "completed WOMAN + /start returns PENDING_MODERATION response", async () => {
   const beforeProfiles = await count("profiles", "user_id=$1::uuid", [womanUserId]);
   const beforeSessions = await count("profile_ai_sessions", "user_id=$1::uuid", [womanUserId]);
   const result = await runUpdate(message(womanTelegramId, "/start", "Анна"));
@@ -399,7 +426,7 @@ await test(20, "completed WOMAN + /start returns PENDING_MODERATION response", a
 });
 
 let completedWomanRepeat;
-await test(21, "completed WOMAN + repeated ROLE_WOMAN creates no DRAFT profile", async () => {
+await test(22, "completed WOMAN + repeated ROLE_WOMAN creates no DRAFT profile", async () => {
   completedWomanRepeat = await runUpdate(callback(womanTelegramId, "role:woman", "Анна"));
   assert.equal(completedWomanRepeat.state.role_decision, "IDEMPOTENT");
   assert.equal(completedWomanRepeat.reloaded.role, "woman");
@@ -408,20 +435,20 @@ await test(21, "completed WOMAN + repeated ROLE_WOMAN creates no DRAFT profile",
   return "role remains woman; no DRAFT profile created";
 });
 
-await test(22, "completed WOMAN + repeated ROLE_WOMAN creates no IN_PROGRESS session", async () => {
+await test(23, "completed WOMAN + repeated ROLE_WOMAN creates no IN_PROGRESS session", async () => {
   assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid AND status='IN_PROGRESS'", [womanUserId]), 0);
   assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid AND status='COMPLETED'", [womanUserId]), 1);
   return "completed session reused as lifecycle evidence; no active session created";
 });
 
-await test(23, "first WOMAN question is not returned after completion", async () => {
+await test(24, "first WOMAN question is not returned after completion", async () => {
   const reply = prepareReply(completedWomanRepeat.reloaded)[0].json;
   assert.notEqual(reply.message, "Как тебя зовут?");
   assert.equal(reply.message, "Анкета заполнена и ожидает модерации.");
   return "reply is lifecycle status, not onboarding step 0";
 });
 
-await test(24, "ACTIVE WOMAN /start does not restart onboarding", async () => {
+await test(25, "ACTIVE WOMAN /start does not restart onboarding", async () => {
   await db.query("UPDATE profiles SET status='ACTIVE',updated_at=now() WHERE id=$1::uuid", [womanProfileId]);
   const result = await runUpdate(message(womanTelegramId, "/start", "Анна"));
   const reply = prepareReply(result.reloaded)[0].json;
@@ -430,6 +457,48 @@ await test(24, "ACTIVE WOMAN /start does not restart onboarding", async () => {
   assert.equal(await count("profiles", "user_id=$1::uuid AND status='DRAFT'", [womanUserId]), 0);
   assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid AND status='IN_PROGRESS'", [womanUserId]), 0);
   return "ACTIVE status returned; no DRAFT profile or IN_PROGRESS session";
+});
+
+await test(26, "terminal WOMAN profiles win over stale DRAFT and prevent session creation", async () => {
+  const terminalStates = ["ACTIVE", "PENDING_MODERATION", "BLOCKED"];
+  for (let index = 0; index < terminalStates.length; index += 1) {
+    const telegramId = 910001100 + index;
+    await runUpdate(message(telegramId, "/start", `Terminal ${index}`));
+    const selected = await runUpdate(callback(telegramId, "role:woman", `Terminal ${index}`));
+    const userId = selected.reloaded.user_id;
+    const terminalProfileId = selected.reloaded.woman_profile_id;
+    const originalSessionId = selected.reloaded.woman_session_id;
+    await db.query("UPDATE profiles SET status=$2,updated_at=now() WHERE id=$1::uuid", [terminalProfileId, terminalStates[index]]);
+    await db.query("UPDATE profile_ai_sessions SET status='COMPLETED',updated_at=now() WHERE id=$1::uuid", [originalSessionId]);
+    await db.query("INSERT INTO profiles(user_id,status,created_at,updated_at) VALUES($1::uuid,'DRAFT',now()-interval '1 day',now()-interval '1 day')", [userId]);
+    const beforeProfiles = await count("profiles", "user_id=$1::uuid", [userId]);
+    const beforeDrafts = await count("profiles", "user_id=$1::uuid AND status='DRAFT'", [userId]);
+    const beforeSessions = await count("profile_ai_sessions", "user_id=$1::uuid", [userId]);
+    const resolved = await runUpdate(message(telegramId, "/start", `Terminal ${index}`));
+    assert.equal(resolved.reloaded.woman_state, terminalStates[index]);
+    assert.equal(resolved.reloaded.woman_profile_id, terminalProfileId);
+    assert.equal(await count("profiles", "user_id=$1::uuid", [userId]), beforeProfiles);
+    assert.equal(await count("profiles", "user_id=$1::uuid AND status='DRAFT'", [userId]), beforeDrafts);
+    assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid", [userId]), beforeSessions);
+    assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid AND status='IN_PROGRESS'", [userId]), 0);
+  }
+  return "ACTIVE, PENDING_MODERATION, and BLOCKED each outranked stale DRAFT; no IN_PROGRESS session was created";
+});
+
+await test(27, "finalization rejects non-DRAFT profile without side effects", async () => {
+  const user = (await rows("INSERT INTO users(role) VALUES('woman') RETURNING id::text"))[0];
+  const profile = (await rows("INSERT INTO profiles(user_id,status) VALUES($1::uuid,'ACTIVE') RETURNING id::text", [user.id]))[0];
+  const session = (await rows("INSERT INTO profile_ai_sessions(user_id,profile_id,status) VALUES($1::uuid,$2::uuid,'IN_PROGRESS') RETURNING id::text", [user.id, profile.id]))[0];
+  const beforeModeration = await count("profile_moderation", "profile_id=$1::uuid", [profile.id]);
+  const beforeAudit = await count("audit_events", "event_data->>'profile_id'=$1", [profile.id]);
+  const result = (await db.query(finalizeWomanSql, bind({ session_id: session.id }))).rows[0];
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "WOMAN_FINALIZATION_NOT_AVAILABLE");
+  assert.equal((await rows("SELECT status FROM profiles WHERE id=$1::uuid", [profile.id]))[0].status, "ACTIVE");
+  assert.equal((await rows("SELECT status FROM profile_ai_sessions WHERE id=$1::uuid", [session.id]))[0].status, "IN_PROGRESS");
+  assert.equal(await count("profile_moderation", "profile_id=$1::uuid", [profile.id]), beforeModeration);
+  assert.equal(await count("audit_events", "event_data->>'profile_id'=$1", [profile.id]), beforeAudit);
+  return "ACTIVE profile and IN_PROGRESS session unchanged; no moderation/audit rows inserted";
 });
 
 const catalogSameCityIds = [];
@@ -441,7 +510,7 @@ async function insertProfile(role, status, city, age, name) {
   return (await rows("INSERT INTO profiles(user_id,status,name,age,city,city_normalized,created_at) VALUES($1::uuid,$2,$3,$4,$5,normalize_city_name($5),now()) RETURNING id::text", [user.id, status, name, age, city]))[0].id;
 }
 
-await test(25, "catalog without preferences returns all same-city ACTIVE WOMAN profiles", async () => {
+await test(28, "catalog without preferences returns all same-city ACTIVE WOMAN profiles", async () => {
   catalogSameCityIds.push(await insertProfile("woman", "ACTIVE", "Сызрань", 22, "Каталог 22"));
   catalogSameCityIds.push(await insertProfile("woman", "ACTIVE", "Сызрань", 35, "Каталог 35"));
   catalogSameCityIds.push(await insertProfile("woman", "ACTIVE", "Сызрань", 45, "Каталог 45"));
@@ -454,7 +523,7 @@ await test(25, "catalog without preferences returns all same-city ACTIVE WOMAN p
   return `returned all ${actual.rows.length} ACTIVE WOMAN profiles in normalized city; score=0`;
 });
 
-await test(26, "preferences change only ranking, not candidate set", async () => {
+await test(29, "preferences change only ranking, not candidate set", async () => {
   await db.query("INSERT INTO male_search_preferences(user_id,age_from,age_to) VALUES($1::uuid,20,30)", [manUserId]);
   const actual = await db.query(catalogSql, bind({ viewer_user_id: manUserId, limit: 50, offset: 0 }));
   assert.deepEqual(new Set(actual.rows.map((x) => x.id)), new Set(catalogSameCityIds));
@@ -466,7 +535,7 @@ await test(26, "preferences change only ranking, not candidate set", async () =>
   return "same candidate IDs; age preference changes score/order only";
 });
 
-await test(27, "catalog hard filters exclude wrong city/status/owner", async () => {
+await test(30, "catalog hard filters exclude wrong city/status/owner", async () => {
   const actual = await db.query(catalogSql, bind({ viewer_user_id: manUserId, limit: 50, offset: 0 }));
   const ids = new Set(actual.rows.map((x) => x.id));
   assert.equal(ids.has(catalogOtherCityId), false);
@@ -476,7 +545,7 @@ await test(27, "catalog hard filters exclude wrong city/status/owner", async () 
   return "wrong city, non-ACTIVE, and MAN-owned profiles excluded";
 });
 
-await test(28, "single JSON bind preserves user-controlled commas", async () => {
+await test(31, "single JSON bind preserves user-controlled commas", async () => {
   const answer = "текст, с несколькими, запятыми";
   const registered = (await db.query(registrationSql, bind({
     telegram_id: 910000777,
