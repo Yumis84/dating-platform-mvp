@@ -217,6 +217,35 @@ class WorkflowStaticTests(unittest.TestCase):
         self.assertIn("telegram_file_id", photo["parameters"]["query"])
 
 
+    def test_n8n_v2_if_nodes_and_handoff_response_contract(self):
+        for name in ("wf01", "wf03", "wf05"):
+            workflow = load_workflow(WORKFLOWS[name])
+            for node in workflow["nodes"]:
+                if node["type"] != "n8n-nodes-base.if":
+                    continue
+                conditions = node["parameters"].get("conditions", {})
+                with self.subTest(workflow=name, node=node["name"]):
+                    self.assertEqual(node["typeVersion"], 2)
+                    self.assertIn("conditions", conditions)
+                    self.assertIn("combinator", conditions)
+                    self.assertNotIn("boolean", conditions)
+                    self.assertNotIn("string", conditions)
+                    self.assertTrue(conditions["conditions"])
+                    for condition in conditions["conditions"]:
+                        self.assertIn("operator", condition)
+                        self.assertIn("type", condition["operator"])
+                        self.assertIn("operation", condition["operator"])
+
+        wf01 = load_workflow(WORKFLOWS["wf01"])
+        handoff = next(node for node in wf01["nodes"] if node["name"] == "Handoff WOMAN Event to WF_03")
+        response = handoff["parameters"]["options"]["response"]["response"]
+        self.assertEqual(response["responseFormat"], "autodetect")
+        reply = next(node for node in wf01["nodes"] if node["name"] == "Prepare WF_03 Reply")
+        self.assertIn("JSON.parse", reply["parameters"]["jsCode"])
+        self.assertIn("Array.isArray", reply["parameters"]["jsCode"])
+        self.assertIn("handoff_ok", reply["parameters"]["jsCode"])
+
+
 class SchemaAndRankingTests(unittest.TestCase):
     def test_city_normalization_contract(self):
         self.assertEqual(normalize_city("  Орёл  "), "орел")

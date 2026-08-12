@@ -121,12 +121,22 @@
       ],
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$json.role === 'woman' && $json.woman_state === 'IN_PROGRESS' && ['TEXT','PHOTO'].includes($json.action) && Boolean($json.woman_session_id) && $json.role_decision !== 'REJECTED'}}",
-              "value2": true
+              "id": "wf01-should-handoff-condition-1",
+              "leftValue": "={{$json.role === 'woman' && $json.woman_state === 'IN_PROGRESS' && ['TEXT','PHOTO'].includes($json.action) && Boolean($json.woman_session_id) && $json.role_decision !== 'REJECTED'}}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       }
     },
@@ -161,7 +171,7 @@
             "response": {
               "neverError": true,
               "fullResponse": true,
-              "responseFormat": "json"
+              "responseFormat": "autodetect"
             }
           }
         },
@@ -186,7 +196,7 @@
         180
       ],
       "parameters": {
-        "jsCode": "const state=$('Reload Role State').item.json; const envelope=$json; const status=Number(envelope.statusCode??200); const response=envelope.body??envelope; const valid=status>=200&&status<300&&response&&typeof response==='object'&&typeof response.message==='string'&&response.message.trim(); const message=valid?String(response.message):'Не удалось обработать ответ. Попробуйте ещё раз.'; return [{json:{...state,message,reply_kind:'PLAIN',handoff_ok:Boolean(valid)}}];"
+        "jsCode": "const state=$('Reload Role State').item.json; const envelope=$json; const status=Number(envelope.statusCode??200); let response=envelope.body??envelope; if(typeof response==='string'){try{response=JSON.parse(response);}catch{}} if(Array.isArray(response)&&response.length===1)response=response[0]; const valid=status>=200&&status<300&&response&&typeof response==='object'&&typeof response.message==='string'&&response.message.trim(); const message=valid?String(response.message):'Не удалось обработать ответ. Попробуйте ещё раз.'; return [{json:{...state,message,reply_kind:'PLAIN',handoff_ok:Boolean(valid)}}];"
       }
     },
     {
@@ -226,13 +236,23 @@
       ],
       "parameters": {
         "conditions": {
-          "string": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$json.reply_kind}}",
-              "operation": "equals",
-              "value2": "ROLE_CHOICE"
+              "id": "wf01-is-role-choice-condition-1",
+              "leftValue": "={{$json.reply_kind}}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "ROLE_CHOICE"
             }
-          ]
+          ],
+          "combinator": "and"
         }
       }
     },
@@ -291,13 +311,23 @@
       ],
       "parameters": {
         "conditions": {
-          "string": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$json.reply_kind}}",
-              "operation": "equals",
-              "value2": "NAME_CONFIRM"
+              "id": "wf01-is-name-confirm-condition-1",
+              "leftValue": "={{$json.reply_kind}}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "NAME_CONFIRM"
             }
-          ]
+          ],
+          "combinator": "and"
         }
       }
     },
@@ -356,13 +386,23 @@
       ],
       "parameters": {
         "conditions": {
-          "string": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$json.reply_kind}}",
-              "operation": "equals",
-              "value2": "CATALOG_CHOICE"
+              "id": "wf01-is-catalog-choice-condition-1",
+              "leftValue": "={{$json.reply_kind}}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "CATALOG_CHOICE"
             }
-          ]
+          ],
+          "combinator": "and"
         }
       }
     },
@@ -442,12 +482,22 @@
       ],
       "parameters": {
         "conditions": {
-          "string": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$('Normalize Telegram Event').item.json.callback_query_id}}",
-              "operation": "isNotEmpty"
+              "id": "wf01-has-callback-condition-1",
+              "leftValue": "={{$('Normalize Telegram Event').item.json.callback_query_id}}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       }
     },
