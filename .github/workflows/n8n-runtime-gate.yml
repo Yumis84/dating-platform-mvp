@@ -1,0 +1,91 @@
+name: Disposable n8n Runtime Gate
+
+on:
+  push:
+    branches:
+      - test/n8n-runtime-gate
+    paths:
+      - .github/workflows/n8n-runtime-gate.yml
+      - tests/n8n_runtime_gate/**
+      - n8n/workflows/registration/WF_01_USER_REGISTRATION_MAN_WOMAN_DEV.json
+      - n8n/workflows/profile/WF_03_AI_PROFILE_AGENT.json
+      - n8n/workflows/catalog/WF_05_PROFILE_CATALOG_RANKING_DEV.json
+      - database/migrations/001_users_and_telegram_accounts_schema.sql
+      - database/migrations/002_profiles_schema.sql
+      - database/migrations/003_moderation_schema.sql
+      - database/migrations/004_catalog_schema.sql
+      - database/migrations/008_audit_events_schema.sql
+      - database/migrations/009_woman_profile_tz02_schema.sql
+      - database/migrations/010_man_search_context_preferences_schema.sql
+
+permissions:
+  contents: read
+
+concurrency:
+  group: n8n-runtime-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-gate:
+    name: Real n8n 2.34.5 / disposable PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: runtime_gate
+          POSTGRES_USER: runtime_gate
+          POSTGRES_PASSWORD: runtime_gate_pw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U runtime_gate -d runtime_gate"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+
+    env:
+      N8N_IMAGE: docker.n8n.io/n8nio/n8n:2.34.5
+      N8N_ENCRYPTION_KEY: rtg-encryption-${{ github.run_id }}-${{ github.run_attempt }}-local-only
+      RUNTIME_GATE_PG_HOST: 127.0.0.1
+      RUNTIME_GATE_PG_PORT: "5432"
+      RUNTIME_GATE_PG_DATABASE: runtime_gate
+      RUNTIME_GATE_PG_USER: runtime_gate
+      RUNTIME_GATE_PG_PASSWORD: runtime_gate_pw
+      RUNTIME_GATE_HEADER_NAME: X-Runtime-Gate
+      RUNTIME_GATE_HEADER_VALUE: rtg-header-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout isolated test branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime-gate clients
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          python -m pip install --disable-pip-version-check --no-cache-dir "psycopg[binary]>=3.2,<4" "requests>=2.32,<3"
+
+      - name: Pull pinned n8n image
+        run: docker pull "$N8N_IMAGE"
+
+      - name: Run isolated real n8n gate R1-R14
+        run: bash tests/n8n_runtime_gate/setup_and_run.sh
+
+      - name: Upload sanitized runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: n8n-runtime-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .runtime/artifacts/**
+          if-no-files-found: warn
+          retention-days: 7
