@@ -161,6 +161,21 @@ def clone_wf01():
     handoff = node_by_name["Handoff WOMAN Event to WF_03"]
     bind_header_credential(handoff)
 
+    # Real n8n 2.34.5 proved that a successful WF_03 handoff can arrive at this
+    # node as a JSON string or a one-item array. The feature code currently treats
+    # only a plain object as success, causing a false retry message after successful
+    # persistence. Normalize those two transport shapes in the runtime clone only.
+    reply = node_by_name["Prepare WF_03 Reply"]
+    reply["parameters"]["jsCode"] = (
+        "const state=$('Reload Role State').item.json; const envelope=$json; "
+        "const status=Number(envelope.statusCode??200); let response=envelope.body??envelope; "
+        "if(typeof response==='string'){try{response=JSON.parse(response);}catch{}} "
+        "if(Array.isArray(response)&&response.length===1)response=response[0]; "
+        "const valid=status>=200&&status<300&&response&&typeof response==='object'&&typeof response.message==='string'&&response.message.trim(); "
+        "const message=valid?String(response.message):'Не удалось обработать ответ. Попробуйте ещё раз.'; "
+        "return [{json:{...state,message,reply_kind:'PLAIN',handoff_ok:Boolean(valid),_runtime_gate_http_status:status,_runtime_gate_http_body:response}}];"
+    )
+
     passthrough_nodes = {
         "Send Role Choice",
         "Send MAN Name Confirmation",
