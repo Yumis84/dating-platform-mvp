@@ -30,7 +30,7 @@ docker run -d \
   -e EXECUTIONS_DATA_SAVE_ON_SUCCESS=all \
   -e EXECUTIONS_DATA_SAVE_ON_ERROR=all \
   -e EXECUTIONS_DATA_PRUNE=false \
-  -e WEBHOOK_URL=http://127.0.0.1:5678/ \
+  -e N8N_WEBHOOK_URL=http://127.0.0.1:5678/ \
   -e WF_03_TRIGGER_URL="$TARGET_URL" \
   -e DEEPSEEK_API_URL=http://127.0.0.1:18080/v1/chat/completions \
   -e DEEPSEEK_API_KEY=runtime-gate-dummy \
@@ -38,14 +38,17 @@ docker run -d \
   -v "$DATA_DIR:/home/node/.n8n" \
   "$N8N_IMAGE" >/dev/null
 
-for _ in $(seq 1 60); do
-  if curl --silent --fail http://127.0.0.1:5678/healthz >/dev/null 2>&1; then
-    echo "n8n ready: $TARGET_URL"
+# /healthz is only liveness and can return 200 before active workflows/webhooks
+# are registered. /healthz/readiness is unblocked only after n8n marks the
+# instance fully ready, so runtime HTTP tests must wait for it.
+for _ in $(seq 1 90); do
+  if curl --silent --fail http://127.0.0.1:5678/healthz/readiness >/dev/null 2>&1; then
+    echo "n8n fully ready: $TARGET_URL"
     exit 0
   fi
   sleep 1
 done
 
-echo "n8n failed to become healthy" >&2
+echo "n8n failed to become fully ready" >&2
 docker logs n8n-runtime-gate >&2 || true
 exit 1
