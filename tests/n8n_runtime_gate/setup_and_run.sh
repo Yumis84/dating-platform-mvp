@@ -95,7 +95,10 @@ fi
 
 printf '\n== Build runtime-only workflow clones and credentials ==\n'
 python tests/n8n_runtime_gate/build_runtime_gate.py
-chmod 0600 "$GATE_DIR/credentials.json"
+# The CLI container runs as the n8n `node` user, so the bind-mounted ephemeral file
+# must be world-readable on this dedicated runner. It is deleted in cleanup and is
+# never uploaded as an artifact; values are runtime-only and not production secrets.
+chmod 0644 "$GATE_DIR/credentials.json"
 
 printf '\n== Start deterministic AI/failure mock ==\n'
 python -u tests/n8n_runtime_gate/mock_ai.py >"$MOCK_LOG" 2>&1 &
