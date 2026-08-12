@@ -53,13 +53,6 @@ def bind_header_credential(node):
 
 
 def normalize_if_nodes(workflow):
-    """Runtime-only adapter for legacy IF JSON found by the real n8n gate.
-
-    n8n 2.34.5 IfV2 expects a filter object. The canonical feature artifacts still
-    contain the old conditions.boolean / conditions.string shape. Convert only the
-    generated runtime clones so we can prove the rest of the flow before proposing
-    a feature-branch patch.
-    """
     converted = []
     for node in workflow["nodes"]:
         if node.get("type") != "n8n-nodes-base.if":
@@ -67,23 +60,16 @@ def normalize_if_nodes(workflow):
         legacy = node.get("parameters", {}).get("conditions", {})
         if "conditions" in legacy and "combinator" in legacy:
             continue
-
         filter_conditions = []
         index = 0
         for item in legacy.get("boolean", []):
             index += 1
             expected = bool(item.get("value2", True))
-            filter_conditions.append(
-                {
-                    "id": f"{node['id']}-condition-{index}",
-                    "leftValue": item.get("value1", ""),
-                    "operator": {
-                        "type": "boolean",
-                        "operation": "true" if expected else "false",
-                    },
-                }
-            )
-
+            filter_conditions.append({
+                "id": f"{node['id']}-condition-{index}",
+                "leftValue": item.get("value1", ""),
+                "operator": {"type": "boolean", "operation": "true" if expected else "false"},
+            })
         string_ops = {
             "equals": "equals",
             "isNotEmpty": "notEmpty",
@@ -96,9 +82,7 @@ def normalize_if_nodes(workflow):
             index += 1
             legacy_op = item.get("operation", "equals")
             if legacy_op not in string_ops:
-                raise RuntimeError(
-                    f"Unsupported legacy IF string operation {legacy_op!r} in {node['name']}"
-                )
+                raise RuntimeError(f"Unsupported legacy IF string operation {legacy_op!r} in {node['name']}")
             operation = string_ops[legacy_op]
             condition = {
                 "id": f"{node['id']}-condition-{index}",
@@ -108,23 +92,14 @@ def normalize_if_nodes(workflow):
             if operation not in unary_string_ops:
                 condition["rightValue"] = item.get("value2", "")
             filter_conditions.append(condition)
-
         if not filter_conditions:
-            raise RuntimeError(
-                f"IF node {node['name']} has an unrecognized legacy conditions shape: {legacy}"
-            )
-
+            raise RuntimeError(f"IF node {node['name']} has an unrecognized legacy conditions shape: {legacy}")
         node["parameters"]["conditions"] = {
-            "options": {
-                "caseSensitive": True,
-                "leftValue": "",
-                "typeValidation": "strict",
-            },
+            "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "strict"},
             "conditions": filter_conditions,
             "combinator": "and",
         }
         converted.append(node["name"])
-
     workflow.setdefault("meta", {})["runtimeGateIfAdapters"] = converted
 
 
@@ -134,7 +109,6 @@ def clone_wf01():
     wf["name"] = "WF_01_RUNTIME_GATE"
     wf["active"] = False
     wf.setdefault("meta", {})["runtimeGateOnly"] = True
-
     node_by_name = {n["name"]: n for n in wf["nodes"]}
 
     trigger = node_by_name["Telegram Trigger"]
@@ -160,11 +134,11 @@ def clone_wf01():
     bind_postgres_credentials(wf)
     handoff = node_by_name["Handoff WOMAN Event to WF_03"]
     bind_header_credential(handoff)
+    # n8n 2.34.5 forces useStream=true for raw request bodies. The stream is
+    # consumed and parsed in the autodetect response branch; explicit json leaves
+    # the raw IncomingMessage object visible to the next node.
+    handoff["parameters"]["options"]["response"]["response"]["responseFormat"] = "autodetect"
 
-    # Real n8n 2.34.5 proved that a successful WF_03 handoff can arrive at this
-    # node as a JSON string or a one-item array. The feature code currently treats
-    # only a plain object as success, causing a false retry message after successful
-    # persistence. Normalize those two transport shapes in the runtime clone only.
     reply = node_by_name["Prepare WF_03 Reply"]
     reply["parameters"]["jsCode"] = (
         "const state=$('Reload Role State').item.json; const envelope=$json; "
@@ -173,16 +147,10 @@ def clone_wf01():
         "if(Array.isArray(response)&&response.length===1)response=response[0]; "
         "const valid=status>=200&&status<300&&response&&typeof response==='object'&&typeof response.message==='string'&&response.message.trim(); "
         "const message=valid?String(response.message):'Не удалось обработать ответ. Попробуйте ещё раз.'; "
-        "return [{json:{...state,message,reply_kind:'PLAIN',handoff_ok:Boolean(valid),_runtime_gate_http_status:status,_runtime_gate_http_body:response}}];"
+        "return [{json:{...state,message,reply_kind:'PLAIN',handoff_ok:Boolean(valid)}}];"
     )
 
-    passthrough_nodes = {
-        "Send Role Choice",
-        "Send MAN Name Confirmation",
-        "Send MAN Catalog Choice",
-        "Send Role-Specific Reply",
-    }
-    for name in passthrough_nodes:
+    for name in {"Send Role Choice", "Send MAN Name Confirmation", "Send MAN Catalog Choice", "Send Role-Specific Reply"}:
         node = node_by_name[name]
         node["type"] = "n8n-nodes-base.code"
         node["typeVersion"] = 2
@@ -194,11 +162,7 @@ def clone_wf01():
         node["type"] = "n8n-nodes-base.respondToWebhook"
         node["typeVersion"] = 1.4
         node.pop("credentials", None)
-        node["parameters"] = {
-            "respondWith": "json",
-            "responseBody": "={{$json}}",
-            "options": {},
-        }
+        node["parameters"] = {"respondWith": "json", "responseBody": "={{$json}}", "options": {}}
 
     normalize_if_nodes(wf)
     return wf
@@ -211,13 +175,11 @@ def clone_wf03():
     wf["active"] = False
     wf.setdefault("meta", {})["runtimeGateOnly"] = True
     node_by_name = {n["name"]: n for n in wf["nodes"]}
-
     trigger = node_by_name["WOMAN Profile Webhook"]
     trigger["webhookId"] = WEBHOOK_IDS["wf03"]
     trigger["parameters"]["path"] = "runtime-gate/woman-profile"
     trigger["parameters"]["authentication"] = "headerAuth"
     bind_header_credential(trigger)
-
     bind_postgres_credentials(wf)
     normalize_if_nodes(wf)
     return wf
@@ -245,97 +207,52 @@ def bind_probe_workflow():
         "settings": {"executionOrder": "v1"},
         "nodes": [
             {
-                "id": "rtg-probe-trigger",
-                "name": "Probe Webhook",
-                "type": "n8n-nodes-base.webhook",
-                "typeVersion": 2,
-                "webhookId": WEBHOOK_IDS["probe"],
-                "position": [0, 0],
-                "parameters": {
-                    "httpMethod": "POST",
-                    "path": "runtime-gate/bind-probe",
-                    "responseMode": "responseNode",
-                    "options": {},
-                },
+                "id": "rtg-probe-trigger", "name": "Probe Webhook", "type": "n8n-nodes-base.webhook",
+                "typeVersion": 2, "webhookId": WEBHOOK_IDS["probe"], "position": [0, 0],
+                "parameters": {"httpMethod": "POST", "path": "runtime-gate/bind-probe", "responseMode": "responseNode", "options": {}},
             },
             {
-                "id": "rtg-probe-postgres",
-                "name": "Probe Postgres JSON Bind",
-                "type": "n8n-nodes-base.postgres",
-                "typeVersion": 2.6,
-                "position": [220, 0],
-                "credentials": {
-                    "postgres": {"id": PG_CRED_ID, "name": PG_CRED_NAME}
-                },
+                "id": "rtg-probe-postgres", "name": "Probe Postgres JSON Bind", "type": "n8n-nodes-base.postgres",
+                "typeVersion": 2.6, "position": [220, 0],
+                "credentials": {"postgres": {"id": PG_CRED_ID, "name": PG_CRED_NAME}},
                 "parameters": {
                     "operation": "executeQuery",
                     "query": "WITH bind AS (SELECT $1::jsonb AS data) SELECT data->>'probe' AS observed, octet_length(convert_to(data->>'probe','UTF8')) AS utf8_bytes FROM bind;",
-                    "options": {
-                        "queryReplacement": "={{JSON.stringify({probe:$json.body.probe})}}"
-                    },
+                    "options": {"queryReplacement": "={{JSON.stringify({probe:$json.body.probe})}}"},
                 },
             },
             {
-                "id": "rtg-probe-response",
-                "name": "Probe Response",
-                "type": "n8n-nodes-base.respondToWebhook",
-                "typeVersion": 1.4,
-                "position": [440, 0],
-                "parameters": {
-                    "respondWith": "json",
-                    "responseBody": "={{$json}}",
-                    "options": {},
-                },
+                "id": "rtg-probe-response", "name": "Probe Response", "type": "n8n-nodes-base.respondToWebhook",
+                "typeVersion": 1.4, "position": [440, 0],
+                "parameters": {"respondWith": "json", "responseBody": "={{$json}}", "options": {}},
             },
         ],
         "connections": {
-            "Probe Webhook": {
-                "main": [[{"node": "Probe Postgres JSON Bind", "type": "main", "index": 0}]]
-            },
-            "Probe Postgres JSON Bind": {
-                "main": [[{"node": "Probe Response", "type": "main", "index": 0}]]
-            },
+            "Probe Webhook": {"main": [[{"node": "Probe Postgres JSON Bind", "type": "main", "index": 0}]]},
+            "Probe Postgres JSON Bind": {"main": [[{"node": "Probe Response", "type": "main", "index": 0}]]},
         },
         "meta": {"runtimeGateOnly": True, "devOnly": True},
     }
 
 
 def credentials_payload():
-    required = [
-        "RUNTIME_GATE_PG_HOST",
-        "RUNTIME_GATE_PG_DATABASE",
-        "RUNTIME_GATE_PG_USER",
-        "RUNTIME_GATE_PG_PASSWORD",
-        "RUNTIME_GATE_HEADER_VALUE",
-    ]
+    required = ["RUNTIME_GATE_PG_HOST", "RUNTIME_GATE_PG_DATABASE", "RUNTIME_GATE_PG_USER", "RUNTIME_GATE_PG_PASSWORD", "RUNTIME_GATE_HEADER_VALUE"]
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
         raise RuntimeError(f"Missing runtime-gate environment values: {', '.join(missing)}")
-
     return [
         {
-            "id": PG_CRED_ID,
-            "name": PG_CRED_NAME,
-            "type": "postgres",
+            "id": PG_CRED_ID, "name": PG_CRED_NAME, "type": "postgres",
             "data": {
-                "host": os.environ["RUNTIME_GATE_PG_HOST"],
-                "database": os.environ["RUNTIME_GATE_PG_DATABASE"],
-                "user": os.environ["RUNTIME_GATE_PG_USER"],
-                "password": os.environ["RUNTIME_GATE_PG_PASSWORD"],
-                "port": int(os.environ.get("RUNTIME_GATE_PG_PORT", "5432")),
-                "ssl": "disable",
-                "allowUnauthorizedCerts": False,
-                "maxConnections": 20,
+                "host": os.environ["RUNTIME_GATE_PG_HOST"], "database": os.environ["RUNTIME_GATE_PG_DATABASE"],
+                "user": os.environ["RUNTIME_GATE_PG_USER"], "password": os.environ["RUNTIME_GATE_PG_PASSWORD"],
+                "port": int(os.environ.get("RUNTIME_GATE_PG_PORT", "5432")), "ssl": "disable",
+                "allowUnauthorizedCerts": False, "maxConnections": 20,
             },
         },
         {
-            "id": HEADER_CRED_ID,
-            "name": HEADER_CRED_NAME,
-            "type": "httpHeaderAuth",
-            "data": {
-                "name": os.environ.get("RUNTIME_GATE_HEADER_NAME", "X-Runtime-Gate"),
-                "value": os.environ["RUNTIME_GATE_HEADER_VALUE"],
-            },
+            "id": HEADER_CRED_ID, "name": HEADER_CRED_NAME, "type": "httpHeaderAuth",
+            "data": {"name": os.environ.get("RUNTIME_GATE_HEADER_NAME", "X-Runtime-Gate"), "value": os.environ["RUNTIME_GATE_HEADER_VALUE"]},
         },
     ]
 
@@ -349,25 +266,14 @@ def main():
     }
     for filename, workflow in workflows.items():
         save(filename, workflow)
-
-    (OUT / "credentials.json").write_text(
-        json.dumps(credentials_payload(), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    (OUT / "manifest.json").write_text(
-        json.dumps(
-            {
-                "workflow_ids": WF_IDS,
-                "webhook_ids": WEBHOOK_IDS,
-                "postgres_credential_id": PG_CRED_ID,
-                "header_credential_id": HEADER_CRED_ID,
-                "workflow_files": list(workflows.keys()),
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    (OUT / "credentials.json").write_text(json.dumps(credentials_payload(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (OUT / "manifest.json").write_text(json.dumps({
+        "workflow_ids": WF_IDS,
+        "webhook_ids": WEBHOOK_IDS,
+        "postgres_credential_id": PG_CRED_ID,
+        "header_credential_id": HEADER_CRED_ID,
+        "workflow_files": list(workflows.keys()),
+    }, indent=2) + "\n", encoding="utf-8")
     print(f"Runtime-gate artifacts written to {OUT}")
 
 
