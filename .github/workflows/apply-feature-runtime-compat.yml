@@ -55,6 +55,11 @@ jobs:
           fi
 
           python /tmp/apply_feature_runtime_compat.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('docs/PROJECT_CONTEXT_TRANSFER.md')
+          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8')
+          PY
 
           mapfile -t CHANGED < <(git diff --name-only | sort)
           printf 'Changed files:\n%s\n' "${CHANGED[*]}"
@@ -115,6 +120,11 @@ jobs:
           git checkout -B test/n8n-runtime-gate origin/test/n8n-runtime-gate
 
           python /tmp/apply_feature_runtime_compat.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('docs/PROJECT_CONTEXT_TRANSFER.md')
+          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8')
+          PY
           python tests/test_product_flows.py
           git diff --check
 
