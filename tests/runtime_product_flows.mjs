@@ -26,13 +26,19 @@ const node = (wf, name) => {
 
 const normalizeCode = node(wf01, "Normalize Telegram Event").parameters.jsCode;
 const normalize = new Function("$json", normalizeCode);
+const replyCode = node(wf01, "Prepare Role-Specific Reply").parameters.jsCode;
+const prepareReply = new Function("$json", replyCode);
 const registrationSql = node(wf01, "Register or Resolve Telegram User").parameters.query;
 const stateSql = node(wf01, "Apply Role and Onboarding Event").parameters.query;
 const reloadSql = node(wf01, "Reload Role State").parameters.query;
 const loadWomanSql = node(wf03, "Load WOMAN Draft Session").parameters.query;
 const persistWomanSql = node(wf03, "Persist WOMAN Extraction").parameters.query;
 const savePhotoSql = node(wf03, "Save WOMAN Photo").parameters.query;
+const completenessSql = node(wf03, "Load WOMAN Completeness").parameters.query;
+const cursorSql = node(wf03, "Save Derived WOMAN Cursor").parameters.query;
+const finalizeWomanSql = node(wf03, "Finalize WOMAN Profile").parameters.query;
 const catalogSql = node(wf05, "Query Ranked WOMAN Catalog").parameters.query;
+const bind = (value) => [JSON.stringify(value)];
 
 const db = new PGlite({ extensions: { uuid_ossp } });
 await db.waitReady;
@@ -88,25 +94,29 @@ const photo = (telegramId, fileId, firstName = "") => ({
 async function runUpdate(update) {
   const event = normalize(update)[0].json;
   const registered = (
-    await db.query(registrationSql, [
-      event.telegram_id,
-      event.username,
-      event.action,
-      event.telegram_first_name,
-      event.text,
-    ])
+    await db.query(registrationSql, bind({
+      telegram_id: event.telegram_id,
+      username: event.username,
+      action: event.action,
+      first_name: event.telegram_first_name,
+      answer: event.text,
+    }))
   ).rows[0];
   assert.ok(registered?.user_id, "registration did not return canonical user_id");
   const state = (
-    await db.query(stateSql, [
-      registered.user_id,
-      registered.action,
-      registered.first_name,
-      registered.answer,
-    ])
+    await db.query(stateSql, bind({
+      user_id: registered.user_id,
+      action: registered.action,
+      first_name: registered.first_name,
+      answer: registered.answer,
+    }))
   ).rows[0];
   const reloaded = (
-    await db.query(reloadSql, [state.user_id, state.action, state.role_decision])
+    await db.query(reloadSql, bind({
+      user_id: state.user_id,
+      action: state.action,
+      role_decision: state.role_decision,
+    }))
   ).rows[0];
   return { event, registered, state, reloaded };
 }
@@ -272,10 +282,10 @@ await test(13, "repeated WOMAN callback/start is idempotent", async () => {
   return "no duplicate DRAFT profile or active session";
 });
 
-await test(14, "WF_01 text handoff reaches WF_03 session contract", async () => {
+await test(14, "WF_01 to WF_03 text CONTRACT", async () => {
   const update = normalize(message(womanTelegramId, "Меня зовут Анна", "Анна"))[0].json;
   assert.equal(update.action, "TEXT");
-  const loaded = (await db.query(loadWomanSql, [womanUserId, womanSessionId, womanProfileId])).rows;
+  const loaded = (await db.query(loadWomanSql, bind({ user_id: womanUserId, session_id: womanSessionId, profile_id: womanProfileId }))).rows;
   assert.equal(loaded.length, 1);
   assert.equal(loaded[0].session_id, womanSessionId);
   const handoff = node(wf01, "Handoff WOMAN Event to WF_03");
@@ -283,18 +293,18 @@ await test(14, "WF_01 text handoff reaches WF_03 session contract", async () => 
   for (const key of ["telegram_id", "chat_id", "update_type", "message_text", "user_id", "profile_id", "session_id"]) {
     assert.ok(handoff.parameters.body.includes(key));
   }
-  return "TEXT classified; explicit webhook payload resolves the exact WF_03 session/profile";
+  return "CONTRACT only: TEXT payload fields and target WF_03 session/profile agree; no HTTP execution";
 });
 
-await test(15, "WF_01 photo handoff reaches WF_03 session contract", async () => {
+await test(15, "WF_01 to WF_03 photo CONTRACT", async () => {
   const update = normalize(photo(womanTelegramId, "tg-photo-handoff", "Анна"))[0].json;
   assert.equal(update.action, "PHOTO");
   assert.equal(update.photo_file_id, "tg-photo-handoff");
-  const loaded = (await db.query(loadWomanSql, [womanUserId, womanSessionId, womanProfileId])).rows;
+  const loaded = (await db.query(loadWomanSql, bind({ user_id: womanUserId, session_id: womanSessionId, profile_id: womanProfileId }))).rows;
   assert.equal(loaded.length, 1);
   assert.equal(loaded[0].profile_id, womanProfileId);
   assert.ok(node(wf01, "Handoff WOMAN Event to WF_03").parameters.body.includes("photo_file_id"));
-  return "PHOTO classified with largest Telegram file_id; exact resumable handler found";
+  return "CONTRACT only: PHOTO payload and resumable target agree; no HTTP execution";
 });
 
 await test(16, "prices append without silent overwrite", async () => {
@@ -303,20 +313,20 @@ await test(16, "prices append without silent overwrite", async () => {
     price_operations: [{ operation: "APPEND", service_name, amount, currency: "RUB", duration_minutes: 60, description: null }],
     meeting_place_operations: [],
   });
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, payload("Цена A", 1000)]);
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, payload("Цена B", 2000)]);
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, payload("Цена C", 3000)]);
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: payload("Цена A", 1000) }));
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: payload("Цена B", 2000) }));
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: payload("Цена C", 3000) }));
   const temporary = (await rows("SELECT id::text FROM profile_prices WHERE profile_id=$1::uuid AND service_name='Цена C'", [womanProfileId]))[0];
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, JSON.stringify({
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: JSON.stringify({
     fields: {},
     price_operations: [{ operation: "UPDATE", id: temporary.id, service_name: "Цена C2", amount: 3500, currency: "RUB", duration_minutes: 60, description: null }],
     meeting_place_operations: [],
-  })]);
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, JSON.stringify({
+  }) }));
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: JSON.stringify({
     fields: {},
     price_operations: [{ operation: "DELETE", id: temporary.id }],
     meeting_place_operations: [],
-  })]);
+  }) }));
   const actual = await rows("SELECT service_name,position FROM profile_prices WHERE profile_id=$1::uuid AND is_active ORDER BY position", [womanProfileId]);
   assert.deepEqual(actual.map((x) => x.service_name), ["Цена A", "Цена B"]);
   assert.deepEqual(actual.map((x) => Number(x.position)), [0, 1]);
@@ -329,20 +339,20 @@ await test(17, "meeting places append without silent overwrite", async () => {
     price_operations: [],
     meeting_place_operations: [{ operation: "APPEND", place_type, label, district: null, description: null }],
   });
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, payload("Место A", "HOTEL")]);
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, payload("Место B", "PUBLIC_PLACE")]);
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, payload("Место C", "OTHER")]);
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: payload("Место A", "HOTEL") }));
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: payload("Место B", "PUBLIC_PLACE") }));
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: payload("Место C", "OTHER") }));
   const temporary = (await rows("SELECT id::text FROM profile_meeting_places WHERE profile_id=$1::uuid AND label='Место C'", [womanProfileId]))[0];
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, JSON.stringify({
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: JSON.stringify({
     fields: {},
     price_operations: [],
     meeting_place_operations: [{ operation: "UPDATE", id: temporary.id, place_type: "OTHER", label: "Место C2", district: null, description: null }],
-  })]);
-  await db.query(persistWomanSql, [womanProfileId, womanSessionId, JSON.stringify({
+  }) }));
+  await db.query(persistWomanSql, bind({ profile_id: womanProfileId, session_id: womanSessionId, payload: JSON.stringify({
     fields: {},
     price_operations: [],
     meeting_place_operations: [{ operation: "DELETE", id: temporary.id }],
-  })]);
+  }) }));
   const actual = await rows("SELECT label,position FROM profile_meeting_places WHERE profile_id=$1::uuid AND is_active ORDER BY position", [womanProfileId]);
   assert.deepEqual(actual.map((x) => x.label), ["Место A", "Место B"]);
   assert.deepEqual(actual.map((x) => Number(x.position)), [0, 1]);
@@ -351,15 +361,75 @@ await test(17, "meeting places append without silent overwrite", async () => {
 
 await test(18, "concurrent WOMAN photos are preserved and deduplicated", async () => {
   await Promise.all([
-    db.query(savePhotoSql, [womanProfileId, "tg-concurrent-A"]),
-    db.query(savePhotoSql, [womanProfileId, "tg-concurrent-B"]),
+    db.query(savePhotoSql, bind({ profile_id: womanProfileId, photo_file_id: "tg-concurrent-A" })),
+    db.query(savePhotoSql, bind({ profile_id: womanProfileId, photo_file_id: "tg-concurrent-B" })),
   ]);
-  await db.query(savePhotoSql, [womanProfileId, "tg-concurrent-A"]);
+  await db.query(savePhotoSql, bind({ profile_id: womanProfileId, photo_file_id: "tg-concurrent-A" }));
   const actual = await rows("SELECT telegram_file_id,position FROM profile_photos WHERE profile_id=$1::uuid ORDER BY position", [womanProfileId]);
   assert.equal(actual.length, 2);
   assert.equal(new Set(actual.map((x) => x.telegram_file_id)).size, 2);
   assert.equal(new Set(actual.map((x) => Number(x.position))).size, 2);
   return "two distinct photos stored at distinct positions; repeated file_id deduplicated";
+});
+
+await test(19, "WF_03 cursor and finalization SQL completes WOMAN profile", async () => {
+  const completeness = (await db.query(completenessSql, bind({ session_id: womanSessionId }))).rows[0];
+  assert.equal(completeness.session_id, womanSessionId);
+  assert.equal(Number(completeness.photo_count), 2);
+  const cursor = (await db.query(cursorSql, bind({ session_id: womanSessionId, current_step: 11, complete: true }))).rows[0];
+  assert.equal(cursor.id, womanSessionId);
+  assert.equal(cursor.complete, true);
+  const finalized = (await db.query(finalizeWomanSql, bind({ session_id: womanSessionId }))).rows[0];
+  assert.equal(finalized.profile_id, womanProfileId);
+  assert.equal((await rows("SELECT status FROM profiles WHERE id=$1::uuid", [womanProfileId]))[0].status, "PENDING_MODERATION");
+  assert.equal((await rows("SELECT status FROM profile_ai_sessions WHERE id=$1::uuid", [womanSessionId]))[0].status, "COMPLETED");
+  return "actual completeness/cursor/finalization SQL set PENDING_MODERATION + COMPLETED";
+});
+
+await test(20, "completed WOMAN + /start returns PENDING_MODERATION response", async () => {
+  const beforeProfiles = await count("profiles", "user_id=$1::uuid", [womanUserId]);
+  const beforeSessions = await count("profile_ai_sessions", "user_id=$1::uuid", [womanUserId]);
+  const result = await runUpdate(message(womanTelegramId, "/start", "Анна"));
+  const reply = prepareReply(result.reloaded)[0].json;
+  assert.equal(result.reloaded.woman_state, "PENDING_MODERATION");
+  assert.equal(reply.message, "Анкета заполнена и ожидает модерации.");
+  assert.equal(await count("profiles", "user_id=$1::uuid", [womanUserId]), beforeProfiles);
+  assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid", [womanUserId]), beforeSessions);
+  return "canonical pending response; total profile/session counts unchanged";
+});
+
+let completedWomanRepeat;
+await test(21, "completed WOMAN + repeated ROLE_WOMAN creates no DRAFT profile", async () => {
+  completedWomanRepeat = await runUpdate(callback(womanTelegramId, "role:woman", "Анна"));
+  assert.equal(completedWomanRepeat.state.role_decision, "IDEMPOTENT");
+  assert.equal(completedWomanRepeat.reloaded.role, "woman");
+  assert.equal(completedWomanRepeat.reloaded.woman_state, "PENDING_MODERATION");
+  assert.equal(await count("profiles", "user_id=$1::uuid AND status='DRAFT'", [womanUserId]), 0);
+  return "role remains woman; no DRAFT profile created";
+});
+
+await test(22, "completed WOMAN + repeated ROLE_WOMAN creates no IN_PROGRESS session", async () => {
+  assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid AND status='IN_PROGRESS'", [womanUserId]), 0);
+  assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid AND status='COMPLETED'", [womanUserId]), 1);
+  return "completed session reused as lifecycle evidence; no active session created";
+});
+
+await test(23, "first WOMAN question is not returned after completion", async () => {
+  const reply = prepareReply(completedWomanRepeat.reloaded)[0].json;
+  assert.notEqual(reply.message, "Как тебя зовут?");
+  assert.equal(reply.message, "Анкета заполнена и ожидает модерации.");
+  return "reply is lifecycle status, not onboarding step 0";
+});
+
+await test(24, "ACTIVE WOMAN /start does not restart onboarding", async () => {
+  await db.query("UPDATE profiles SET status='ACTIVE',updated_at=now() WHERE id=$1::uuid", [womanProfileId]);
+  const result = await runUpdate(message(womanTelegramId, "/start", "Анна"));
+  const reply = prepareReply(result.reloaded)[0].json;
+  assert.equal(result.reloaded.woman_state, "ACTIVE");
+  assert.equal(reply.message, "Анкета активна. Можно перейти к доступным действиям.");
+  assert.equal(await count("profiles", "user_id=$1::uuid AND status='DRAFT'", [womanUserId]), 0);
+  assert.equal(await count("profile_ai_sessions", "user_id=$1::uuid AND status='IN_PROGRESS'", [womanUserId]), 0);
+  return "ACTIVE status returned; no DRAFT profile or IN_PROGRESS session";
 });
 
 const catalogSameCityIds = [];
@@ -371,22 +441,22 @@ async function insertProfile(role, status, city, age, name) {
   return (await rows("INSERT INTO profiles(user_id,status,name,age,city,city_normalized,created_at) VALUES($1::uuid,$2,$3,$4,$5,normalize_city_name($5),now()) RETURNING id::text", [user.id, status, name, age, city]))[0].id;
 }
 
-await test(19, "catalog without preferences returns all same-city ACTIVE WOMAN profiles", async () => {
+await test(25, "catalog without preferences returns all same-city ACTIVE WOMAN profiles", async () => {
   catalogSameCityIds.push(await insertProfile("woman", "ACTIVE", "Сызрань", 22, "Каталог 22"));
   catalogSameCityIds.push(await insertProfile("woman", "ACTIVE", "Сызрань", 35, "Каталог 35"));
   catalogSameCityIds.push(await insertProfile("woman", "ACTIVE", "Сызрань", 45, "Каталог 45"));
   catalogOtherCityId = await insertProfile("woman", "ACTIVE", "Москва", 25, "Другой город");
   catalogPendingId = await insertProfile("woman", "PENDING_MODERATION", "Сызрань", 25, "Неактивная");
   catalogManOwnedId = await insertProfile("man", "ACTIVE", "Сызрань", 25, "MAN-owned");
-  const actual = await db.query(catalogSql, [manUserId, 50, 0]);
+  const actual = await db.query(catalogSql, bind({ viewer_user_id: manUserId, limit: 50, offset: 0 }));
   assert.deepEqual(new Set(actual.rows.map((x) => x.id)), new Set(catalogSameCityIds));
   assert.ok(actual.rows.every((x) => Number(x.considered_preferences) === 0 && Number(x.match_score) === 0));
   return `returned all ${actual.rows.length} ACTIVE WOMAN profiles in normalized city; score=0`;
 });
 
-await test(20, "preferences change only ranking, not candidate set", async () => {
+await test(26, "preferences change only ranking, not candidate set", async () => {
   await db.query("INSERT INTO male_search_preferences(user_id,age_from,age_to) VALUES($1::uuid,20,30)", [manUserId]);
-  const actual = await db.query(catalogSql, [manUserId, 50, 0]);
+  const actual = await db.query(catalogSql, bind({ viewer_user_id: manUserId, limit: 50, offset: 0 }));
   assert.deepEqual(new Set(actual.rows.map((x) => x.id)), new Set(catalogSameCityIds));
   assert.equal(actual.rows[0].id, catalogSameCityIds[0]);
   assert.equal(Number(actual.rows[0].matched_preferences), 1);
@@ -396,14 +466,28 @@ await test(20, "preferences change only ranking, not candidate set", async () =>
   return "same candidate IDs; age preference changes score/order only";
 });
 
-await test(21, "catalog hard filters exclude wrong city/status/owner", async () => {
-  const actual = await db.query(catalogSql, [manUserId, 50, 0]);
+await test(27, "catalog hard filters exclude wrong city/status/owner", async () => {
+  const actual = await db.query(catalogSql, bind({ viewer_user_id: manUserId, limit: 50, offset: 0 }));
   const ids = new Set(actual.rows.map((x) => x.id));
   assert.equal(ids.has(catalogOtherCityId), false);
   assert.equal(ids.has(catalogPendingId), false);
   assert.equal(ids.has(catalogManOwnedId), false);
   assert.deepEqual(ids, new Set(catalogSameCityIds));
   return "wrong city, non-ACTIVE, and MAN-owned profiles excluded";
+});
+
+await test(28, "single JSON bind preserves user-controlled commas", async () => {
+  const answer = "текст, с несколькими, запятыми";
+  const registered = (await db.query(registrationSql, bind({
+    telegram_id: 910000777,
+    username: "comma_user",
+    action: "TEXT",
+    first_name: "Имя, с запятой",
+    answer,
+  }))).rows[0];
+  assert.equal(registered.first_name, "Имя, с запятой");
+  assert.equal(registered.answer, answer);
+  return "commas round-trip as data inside one $1::jsonb bind";
 });
 
 await db.close();

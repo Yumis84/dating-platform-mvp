@@ -570,3 +570,12 @@ This append-only entry records repository-only feature work in branch `agent/man
 - The only catalog hard filters are ACTIVE status, WOMAN owner role, and normalized city equality. Nullable MAN preferences affect ranking only.
 - Draft migrations 009/010 define structured WOMAN fields and private MAN state/preferences. They remain unapplied and require duplicate audits, a disposable-schema run, backup/rollback planning, and separate approval.
 - All feature workflow artifacts remain DEV, inactive, not imported, and not published. Production workflow IDs, activeVersion history, restore rules, and publish warnings above remain authoritative safety context.
+
+## 2026-08-12 — Corrective Postgres v2.6 and WOMAN lifecycle draft
+
+- Every inactive DEV Postgres v2.6 node in WF_01/WF_03/WF_05 now uses the official `parameters.options.queryReplacement` path. A single serialized JSON value is bound to `$1::jsonb` and unpacked inside SQL, preserving commas in user-controlled text without interpolation.
+- The old `parameters.additionalFields.queryParams` shape is forbidden by static tests.
+- WF_01 resolves WOMAN lifecycle explicitly: IN_PROGRESS resumes, PENDING_MODERATION/COMPLETED returns the pending response, ACTIVE returns the ready state, and BLOCKED does not restart onboarding.
+- Repeated `/start` and `role:woman` after completion do not create a new DRAFT profile or IN_PROGRESS session and do not return the first WOMAN question.
+- Tests 14/15 verify only the WF_01/WF_03 payload/session contract. The real HTTP Request to Webhook handoff remains an unresolved runtime dependency until an isolated n8n DEV runtime is separately approved and available.
+- These are repository-only drafts. No workflow was imported, activated, or published, and no migration or shared/production database change was performed.

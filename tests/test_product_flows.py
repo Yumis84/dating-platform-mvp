@@ -70,24 +70,33 @@ class WorkflowStaticTests(unittest.TestCase):
                                         changed = True
                 self.assertEqual(reachable, known, f"unreachable nodes: {known - reachable}")
 
-    def test_postgres_nodes_use_positional_parameters(self):
+    def test_postgres_v26_nodes_use_official_query_replacement_json_bind(self):
         for name, path in WORKFLOWS.items():
             workflow = load_workflow(path)
             for node in workflow["nodes"]:
                 if node["type"] != "n8n-nodes-base.postgres":
                     continue
                 query = node["parameters"].get("query", "")
-                query_params = [
-                    item.strip()
-                    for item in node["parameters"].get("additionalFields", {}).get("queryParams", "").split(",")
-                    if item.strip()
-                ]
                 placeholders = [int(value) for value in re.findall(r"\$([1-9][0-9]*)", query)]
                 with self.subTest(workflow=name, node=node["name"]):
+                    self.assertEqual(node["typeVersion"], 2.6)
                     self.assertNotIn("{{", query)
-                    self.assertRegex(query, r"\$[1-9]")
-                    self.assertEqual(max(placeholders), len(query_params))
-                    self.assertEqual(set(placeholders), set(range(1, max(placeholders) + 1)))
+                    self.assertEqual(set(placeholders), {1})
+                    self.assertIn("$1::jsonb", query)
+                    self.assertNotIn("queryParams", node["parameters"].get("additionalFields", {}))
+                    replacement = node["parameters"].get("options", {}).get("queryReplacement")
+                    self.assertIsInstance(replacement, str)
+                    self.assertTrue(replacement.startswith("={{JSON.stringify({"))
+
+    def test_completed_woman_lifecycle_contract_is_explicit(self):
+        workflow = load_workflow(WORKFLOWS["wf01"])
+        reload_query = next(node for node in workflow["nodes"] if node["name"] == "Reload Role State")["parameters"]["query"]
+        reply_code = next(node for node in workflow["nodes"] if node["name"] == "Prepare Role-Specific Reply")["parameters"]["jsCode"]
+        handoff = next(node for node in workflow["nodes"] if node["name"] == "Should Handoff WOMAN Event")
+        for state in ("IN_PROGRESS", "PENDING_MODERATION", "ACTIVE", "BLOCKED"):
+            self.assertIn(state, reload_query)
+        self.assertIn("Анкета заполнена и ожидает модерации.", reply_code)
+        self.assertIn("woman_state === 'IN_PROGRESS'", json.dumps(handoff, ensure_ascii=False))
 
     def test_woman_flow_uses_tz02_fields_and_real_ai_call(self):
         raw = WORKFLOWS["wf03"].read_text(encoding="utf-8")
