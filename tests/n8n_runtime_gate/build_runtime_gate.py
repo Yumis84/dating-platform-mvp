@@ -52,6 +52,82 @@ def bind_header_credential(node):
     }
 
 
+def normalize_if_nodes(workflow):
+    """Runtime-only adapter for legacy IF JSON found by the real n8n gate.
+
+    n8n 2.34.5 IfV2 expects a filter object. The canonical feature artifacts still
+    contain the old conditions.boolean / conditions.string shape. Convert only the
+    generated runtime clones so we can prove the rest of the flow before proposing
+    a feature-branch patch.
+    """
+    converted = []
+    for node in workflow["nodes"]:
+        if node.get("type") != "n8n-nodes-base.if":
+            continue
+        legacy = node.get("parameters", {}).get("conditions", {})
+        if "conditions" in legacy and "combinator" in legacy:
+            continue
+
+        filter_conditions = []
+        index = 0
+        for item in legacy.get("boolean", []):
+            index += 1
+            expected = bool(item.get("value2", True))
+            filter_conditions.append(
+                {
+                    "id": f"{node['id']}-condition-{index}",
+                    "leftValue": item.get("value1", ""),
+                    "operator": {
+                        "type": "boolean",
+                        "operation": "true" if expected else "false",
+                    },
+                }
+            )
+
+        string_ops = {
+            "equals": "equals",
+            "isNotEmpty": "notEmpty",
+            "isEmpty": "empty",
+            "contains": "contains",
+            "notEquals": "notEquals",
+        }
+        unary_string_ops = {"notEmpty", "empty", "exists", "notExists"}
+        for item in legacy.get("string", []):
+            index += 1
+            legacy_op = item.get("operation", "equals")
+            if legacy_op not in string_ops:
+                raise RuntimeError(
+                    f"Unsupported legacy IF string operation {legacy_op!r} in {node['name']}"
+                )
+            operation = string_ops[legacy_op]
+            condition = {
+                "id": f"{node['id']}-condition-{index}",
+                "leftValue": item.get("value1", ""),
+                "operator": {"type": "string", "operation": operation},
+            }
+            if operation not in unary_string_ops:
+                condition["rightValue"] = item.get("value2", "")
+            filter_conditions.append(condition)
+
+        if not filter_conditions:
+            raise RuntimeError(
+                f"IF node {node['name']} has an unrecognized legacy conditions shape: {legacy}"
+            )
+
+        node["parameters"]["conditions"] = {
+            "options": {
+                "caseSensitive": True,
+                "leftValue": "",
+                "typeValidation": "strict",
+            },
+            "conditions": filter_conditions,
+            "combinator": "and",
+        }
+        converted.append(node["name"])
+
+    workflow.setdefault("meta", {})["runtimeGateIfAdapters"] = converted
+
+
 def clone_wf01():
     wf = load("n8n/workflows/registration/WF_01_USER_REGISTRATION_MAN_WOMAN_DEV.json")
     wf["id"] = WF_IDS["wf01"]
@@ -109,6 +185,7 @@ def clone_wf01():
             "options": {},
         }
 
+    normalize_if_nodes(wf)
     return wf
 
 
@@ -127,6 +204,7 @@ def clone_wf03():
     bind_header_credential(trigger)
 
     bind_postgres_credentials(wf)
+    normalize_if_nodes(wf)
     return wf
 
 
@@ -140,6 +218,7 @@ def clone_wf05():
     node_by_name["Catalog Webhook"]["webhookId"] = WEBHOOK_IDS["wf05"]
     node_by_name["Catalog Webhook"]["parameters"]["path"] = "runtime-gate/catalog"
     bind_postgres_credentials(wf)
+    normalize_if_nodes(wf)
     return wf
 
 
