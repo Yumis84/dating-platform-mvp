@@ -19,6 +19,12 @@ WF_IDS = {
     "wf03": "rtgWf03Gate00001",
     "wf05": "rtgWf05Gate00001",
 }
+WEBHOOK_IDS = {
+    "probe": "11111111-1111-4111-8111-111111111111",
+    "wf01": "22222222-2222-4222-8222-222222222222",
+    "wf03": "33333333-3333-4333-8333-333333333333",
+    "wf05": "55555555-5555-4555-8555-555555555555",
+}
 
 
 def load(relative: str):
@@ -58,6 +64,7 @@ def clone_wf01():
     trigger = node_by_name["Telegram Trigger"]
     trigger["type"] = "n8n-nodes-base.webhook"
     trigger["typeVersion"] = 2
+    trigger["webhookId"] = WEBHOOK_IDS["wf01"]
     trigger.pop("credentials", None)
     trigger["parameters"] = {
         "httpMethod": "POST",
@@ -114,6 +121,7 @@ def clone_wf03():
     node_by_name = {n["name"]: n for n in wf["nodes"]}
 
     trigger = node_by_name["WOMAN Profile Webhook"]
+    trigger["webhookId"] = WEBHOOK_IDS["wf03"]
     trigger["parameters"]["path"] = "runtime-gate/woman-profile"
     trigger["parameters"]["authentication"] = "headerAuth"
     bind_header_credential(trigger)
@@ -129,6 +137,7 @@ def clone_wf05():
     wf["active"] = False
     wf.setdefault("meta", {})["runtimeGateOnly"] = True
     node_by_name = {n["name"]: n for n in wf["nodes"]}
+    node_by_name["Catalog Webhook"]["webhookId"] = WEBHOOK_IDS["wf05"]
     node_by_name["Catalog Webhook"]["parameters"]["path"] = "runtime-gate/catalog"
     bind_postgres_credentials(wf)
     return wf
@@ -146,6 +155,7 @@ def bind_probe_workflow():
                 "name": "Probe Webhook",
                 "type": "n8n-nodes-base.webhook",
                 "typeVersion": 2,
+                "webhookId": WEBHOOK_IDS["probe"],
                 "position": [0, 0],
                 "parameters": {
                     "httpMethod": "POST",
@@ -254,6 +264,7 @@ def main():
         json.dumps(
             {
                 "workflow_ids": WF_IDS,
+                "webhook_ids": WEBHOOK_IDS,
                 "postgres_credential_id": PG_CRED_ID,
                 "header_credential_id": HEADER_CRED_ID,
                 "workflow_files": list(workflows.keys()),
