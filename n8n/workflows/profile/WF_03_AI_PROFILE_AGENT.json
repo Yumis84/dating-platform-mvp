@@ -75,12 +75,22 @@
       ],
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$json.session_available === true}}",
-              "value2": true
+              "id": "wf03-session-available-condition-1",
+              "leftValue": "={{$json.session_available === true}}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       }
     },
@@ -95,12 +105,22 @@
       ],
       "parameters": {
         "conditions": {
-          "string": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$('Normalize WOMAN Input').item.json.photo_file_id}}",
-              "operation": "isNotEmpty"
+              "id": "wf03-is-photo-condition-1",
+              "leftValue": "={{$('Normalize WOMAN Input').item.json.photo_file_id}}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       }
     },
@@ -269,12 +289,22 @@
       ],
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$('Determine Next WOMAN Block').item.json.complete}}",
-              "value2": true
+              "id": "wf03-is-complete-condition-1",
+              "leftValue": "={{$('Determine Next WOMAN Block').item.json.complete}}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       }
     },
